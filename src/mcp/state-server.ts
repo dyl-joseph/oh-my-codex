@@ -11,8 +11,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { readFile, writeFile, readdir, mkdir, unlink, rename } from 'fs/promises';
-import { existsSync, readFileSync } from 'fs';
-import { dirname, join, resolve as resolvePath } from 'path';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import {
   getAllScopedStatePaths,
   getReadScopedStateDirs,
@@ -27,9 +27,8 @@ import { withModeRuntimeContext } from '../state/mode-state-context.js';
 import { RALPH_PHASES, validateAndNormalizeRalphState } from '../ralph/contract.js';
 import { ensureCanonicalRalphArtifacts } from '../ralph/persistence.js';
 import { shouldAutoStartMcpServer } from './bootstrap.js';
+import { LEGACY_TEAM_MCP_TOOLS, buildLegacyTeamDeprecationHint } from '../team/api-interop.js';
 import {
-  TEAM_NAME_SAFE_PATTERN,
-  WORKER_NAME_SAFE_PATTERN,
   TASK_ID_SAFE_PATTERN,
   TEAM_TASK_STATUSES,
   TEAM_EVENT_TYPES,
@@ -82,35 +81,8 @@ const STATE_TOOL_NAMES = new Set([
   'state_list_active',
   'state_get_status',
 ]);
-const TEAM_COMM_TOOL_NAMES = new Set([
-  'team_send_message',
-  'team_broadcast',
-  'team_mailbox_list',
-  'team_mailbox_mark_delivered',
-  'team_mailbox_mark_notified',
-  'team_create_task',
-  'team_read_task',
-  'team_list_tasks',
-  'team_update_task',
-  'team_claim_task',
-  'team_transition_task_status',
-  'team_release_task_claim',
-  'team_read_config',
-  'team_read_manifest',
-  'team_read_worker_status',
-  'team_read_worker_heartbeat',
-  'team_update_worker_heartbeat',
-  'team_write_worker_inbox',
-  'team_write_worker_identity',
-  'team_append_event',
-  'team_get_summary',
-  'team_cleanup',
-  'team_write_shutdown_request',
-  'team_read_shutdown_ack',
-  'team_read_monitor_snapshot',
-  'team_write_monitor_snapshot',
-  'team_read_task_approval',
-  'team_write_task_approval',
+const TEAM_COMM_TOOL_NAMES: Set<string> = new Set([
+  ...LEGACY_TEAM_MCP_TOOLS,
 ]);
 
 const TEAM_UPDATE_TASK_MUTABLE_FIELDS = new Set(['subject', 'description', 'blocked_by', 'requires_code_change']);
@@ -170,98 +142,13 @@ function parseValidatedTaskIdArray(value: unknown, fieldName: string): string[] 
   return taskIds;
 }
 
-function teamStateExists(teamName: string, candidateCwd: string): boolean {
-  if (!TEAM_NAME_SAFE_PATTERN.test(teamName)) return false;
-  const teamRoot = join(candidateCwd, '.omx', 'state', 'team', teamName);
-  return (
-    existsSync(join(teamRoot, 'config.json')) ||
-    existsSync(join(teamRoot, 'tasks')) ||
-    existsSync(teamRoot)
-  );
-}
-
-function parseTeamWorkerEnv(raw: string | undefined): { teamName: string; workerName: string } | null {
-  if (typeof raw !== 'string' || raw.trim() === '') return null;
-  const match = /^([a-z0-9][a-z0-9-]{0,29})\/(worker-\d+)$/.exec(raw.trim());
-  if (!match) return null;
-  return { teamName: match[1], workerName: match[2] };
-}
-
-function readTeamStateRootFromFile(path: string): string | null {
-  if (!existsSync(path)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { team_state_root?: unknown };
-    return typeof parsed.team_state_root === 'string' && parsed.team_state_root.trim() !== ''
-      ? parsed.team_state_root.trim()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function stateRootToWorkingDirectory(stateRoot: string): string {
-  const absolute = resolvePath(stateRoot);
-  return dirname(dirname(absolute));
-}
-
-function resolveTeamWorkingDirectoryFromMetadata(
-  teamName: string,
-  candidateCwd: string,
-  workerContext: { teamName: string; workerName: string } | null,
-): string | null {
-  const teamRoot = join(candidateCwd, '.omx', 'state', 'team', teamName);
-  if (!existsSync(teamRoot)) return null;
-
-  if (workerContext?.teamName === teamName) {
-    const workerRoot = readTeamStateRootFromFile(join(teamRoot, 'workers', workerContext.workerName, 'identity.json'));
-    if (workerRoot) return stateRootToWorkingDirectory(workerRoot);
-  }
-
-  const fromManifest = readTeamStateRootFromFile(join(teamRoot, 'manifest.v2.json'));
-  if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
-
-  const fromConfig = readTeamStateRootFromFile(join(teamRoot, 'config.json'));
-  if (fromConfig) return stateRootToWorkingDirectory(fromConfig);
-
-  return null;
-}
-
-function resolveTeamWorkingDirectory(teamName: string, preferredCwd: string): string {
-  const normalizedTeamName = String(teamName || '').trim();
-  if (!normalizedTeamName) return preferredCwd;
-  const envTeamStateRoot = process.env.OMX_TEAM_STATE_ROOT;
-  if (typeof envTeamStateRoot === 'string' && envTeamStateRoot.trim() !== '') {
-    return stateRootToWorkingDirectory(envTeamStateRoot.trim());
-  }
-
-  const seeds: string[] = [];
-  for (const seed of [preferredCwd, process.cwd()]) {
-    if (typeof seed !== 'string' || seed.trim() === '') continue;
-    if (!seeds.includes(seed)) seeds.push(seed);
-  }
-
-  const workerContext = parseTeamWorkerEnv(process.env.OMX_TEAM_WORKER);
-  for (const seed of seeds) {
-    let cursor = seed;
-    while (cursor) {
-      if (teamStateExists(normalizedTeamName, cursor)) {
-        return resolveTeamWorkingDirectoryFromMetadata(normalizedTeamName, cursor, workerContext) ?? cursor;
-      }
-      const parent = dirname(cursor);
-      if (!parent || parent === cursor) break;
-      cursor = parent;
-    }
-  }
-  return preferredCwd;
-}
-
 const server = new Server(
   { name: 'omx-state', version: '0.1.0' },
   { capabilities: { tools: {} } }
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
+export function buildStateServerTools() {
+  return [
     {
       name: 'state_read',
       description: 'Read state for a specific mode. Returns JSON state data or indicates no state exists.',
@@ -737,7 +624,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['team_name', 'task_id', 'status', 'reviewer', 'decision_reason'],
       },
     },
-  ],
+  ].filter((tool) => !tool.name.startsWith('team_'));
+}
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: buildStateServerTools(),
 }));
 
 export async function handleStateToolCall(request: {
@@ -781,33 +672,21 @@ export async function handleStateToolCall(request: {
   }
 
   if (TEAM_COMM_TOOL_NAMES.has(name)) {
-    const teamName = String((args as Record<string, unknown>)?.team_name || '').trim();
-    if (teamName && !TEAM_NAME_SAFE_PATTERN.test(teamName)) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: `Invalid team_name: "${teamName}". Must match /^[a-z0-9][a-z0-9-]{0,29}$/ (lowercase alphanumeric + hyphens, max 30 chars).` }) }],
-        isError: true,
-      };
-    }
-    for (const workerField of ['worker', 'from_worker', 'to_worker']) {
-      const workerVal = String((args as Record<string, unknown>)?.[workerField] || '').trim();
-      if (workerVal && !WORKER_NAME_SAFE_PATTERN.test(workerVal)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Invalid ${workerField}: "${workerVal}". Must match /^[a-z0-9][a-z0-9-]{0,63}$/ (lowercase alphanumeric + hyphens, max 64 chars).` }) }],
-          isError: true,
-        };
-      }
-    }
-    const rawTaskId = String((args as Record<string, unknown>)?.task_id || '').trim();
-    if (rawTaskId && !TASK_ID_SAFE_PATTERN.test(rawTaskId)) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: `Invalid task_id: "${rawTaskId}". Must be a positive integer (digits only, max 20 digits).` }) }],
-        isError: true,
-      };
-    }
-    if (teamName) {
-      cwd = resolveTeamWorkingDirectory(teamName, cwd);
-    }
-    await mkdir(getStateDir(cwd, explicitSessionId), { recursive: true });
+    const hint = buildLegacyTeamDeprecationHint(
+      name as (typeof LEGACY_TEAM_MCP_TOOLS)[number],
+      (args as Record<string, unknown>) ?? {},
+    );
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          error: `MCP tool "${name}" is hard-deprecated. Team mutations now require CLI interop.`,
+          code: 'deprecated_cli_only',
+          hint,
+        }),
+      }],
+      isError: true,
+    };
   }
 
   switch (name) {
