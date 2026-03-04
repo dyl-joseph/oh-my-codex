@@ -10,7 +10,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { parseNotepadPruneDaysOld } from './memory-validation.js';
@@ -262,9 +262,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const notePath = getNotepadPath(wd);
       await mkdir(join(wd, '.omx'), { recursive: true });
       const content = a.content as string;
-      let existing = existsSync(notePath) ? await readFile(notePath, 'utf-8') : '';
+      let existing: string;
+      try {
+        existing = await readFile(notePath, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          existing = '';
+        } else {
+          throw err;
+        }
+      }
       existing = replaceSection(existing, 'PRIORITY', content.slice(0, 500));
-      await writeFile(notePath, existing);
+      const tmpPath = notePath + '.tmp.' + process.pid;
+      await writeFile(tmpPath, existing);
+      await rename(tmpPath, notePath);
       return text({ success: true });
     }
 
@@ -272,9 +283,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const notePath = getNotepadPath(wd);
       await mkdir(join(wd, '.omx'), { recursive: true });
       const entry = `\n[${new Date().toISOString()}] ${a.content as string}`;
-      let existing = existsSync(notePath) ? await readFile(notePath, 'utf-8') : '';
+      let existing: string;
+      try {
+        existing = await readFile(notePath, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          existing = '';
+        } else {
+          throw err;
+        }
+      }
       existing = appendToSection(existing, 'WORKING MEMORY', entry);
-      await writeFile(notePath, existing);
+      const tmpPath = notePath + '.tmp.' + process.pid;
+      await writeFile(tmpPath, existing);
+      await rename(tmpPath, notePath);
       return text({ success: true });
     }
 
@@ -282,9 +304,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const notePath = getNotepadPath(wd);
       await mkdir(join(wd, '.omx'), { recursive: true });
       const entry = `\n${a.content as string}`;
-      let existing = existsSync(notePath) ? await readFile(notePath, 'utf-8') : '';
+      let existing: string;
+      try {
+        existing = await readFile(notePath, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          existing = '';
+        } else {
+          throw err;
+        }
+      }
       existing = appendToSection(existing, 'MANUAL', entry);
-      await writeFile(notePath, existing);
+      const tmpPath = notePath + '.tmp.' + process.pid;
+      await writeFile(tmpPath, existing);
+      await rename(tmpPath, notePath);
       return text({ success: true });
     }
 

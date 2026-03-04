@@ -24,7 +24,7 @@ import {
   buildWorkerStartupCommand,
   resolveTeamWorkerCliPlan,
 } from './tmux-session.js';
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import {
   teamReadConfig as readTeamConfig,
   teamSaveConfig as saveTeamConfig,
@@ -171,7 +171,34 @@ export async function scaleUp(
 
     // Resolve the monotonic worker index counter
     let nextIndex = config.next_worker_index ?? (currentCount + 1);
+    const initialNextIndex = nextIndex;
     const addedWorkers: WorkerInfo[] = [];
+
+    const rollbackScaleUp = async (error: string, paneId?: string): Promise<ScaleError> => {
+      for (const w of addedWorkers) {
+        const idx = config.workers.findIndex((worker) => worker.name === w.name);
+        if (idx >= 0) {
+          config.workers.splice(idx, 1);
+        }
+        try {
+          if (w.pane_id) {
+            execFileSync('tmux', ['kill-pane', '-t', w.pane_id], { stdio: 'pipe' });
+          }
+        } catch {}
+      }
+
+      if (paneId) {
+        try {
+          execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'pipe' });
+        } catch {}
+      }
+
+      config.worker_count = config.workers.length;
+      config.next_worker_index = initialNextIndex;
+      await saveTeamConfig(config, leaderCwd);
+
+      return { ok: false, error };
+    };
 
     // Resolve worker launch args
     const workerLaunchArgs = resolveWorkerLaunchArgsForScaling(env, agentType);
@@ -213,12 +240,12 @@ export async function scaleUp(
       ], { encoding: 'utf-8' });
 
       if (result.status !== 0) {
-        return { ok: false, error: `Failed to create tmux pane for ${workerName}: ${(result.stderr || '').trim()}` };
+        return await rollbackScaleUp(`Failed to create tmux pane for ${workerName}: ${(result.stderr || '').trim()}`);
       }
 
       const paneId = (result.stdout || '').trim().split('\n')[0]?.trim();
       if (!paneId || !paneId.startsWith('%')) {
-        return { ok: false, error: `Failed to capture pane ID for ${workerName}` };
+        return await rollbackScaleUp(`Failed to capture pane ID for ${workerName}`);
       }
 
       // Intentionally avoid forcing `select-layout tiled` here.
@@ -398,17 +425,15 @@ export async function scaleUp(
         }
       }
       if (!outcome.ok) {
-        return { ok: false, error: `scale_up_dispatch_failed:${workerName}:${outcome.reason}` };
+        return await rollbackScaleUp(`scale_up_dispatch_failed:${workerName}:${outcome.reason}`, paneId);
       }
 
       addedWorkers.push(workerInfo);
       config.workers.push(workerInfo);
+      config.worker_count = config.workers.length;
+      config.next_worker_index = nextIndex;
+      await saveTeamConfig(config, leaderCwd);
     }
-
-    // Update config with new workers and next_worker_index
-    config.worker_count = config.workers.length;
-    config.next_worker_index = nextIndex;
-    await saveTeamConfig(config, leaderCwd);
 
     await appendTeamEvent(sanitized, {
       type: 'team_leader_nudge',

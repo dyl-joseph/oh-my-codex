@@ -201,14 +201,20 @@ async function main(): Promise<void> {
   }
 
   // Register signal handlers before poll loop
-  process.on('SIGINT', () => {
-    process.stderr.write('[runtime-cli] Received SIGINT, shutting down...\n');
-    doShutdown('failed').catch(() => process.exit(1));
-  });
-  process.on('SIGTERM', () => {
-    process.stderr.write('[runtime-cli] Received SIGTERM, shutting down...\n');
-    doShutdown('failed').catch(() => process.exit(1));
-  });
+  let shutdownInProgress = false;
+  const handleShutdown = (signal: string): void => {
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
+    process.stderr.write(`[runtime-cli] Received ${signal}, shutting down...\n`);
+    doShutdown('failed')
+      .catch((err) => {
+        process.stderr.write(`[runtime-cli] Shutdown error: ${err}\n`);
+      })
+      .finally(() => process.exit(1));
+  };
+
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 
   // Start the team — OMX's startTeam takes individual parameters
   const agentType = agentTypes[0] ?? 'codex';
