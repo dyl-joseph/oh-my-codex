@@ -31,6 +31,7 @@ import {
   buildNotifyTempStartupMessages,
 } from '../index.js';
 import { HUD_TMUX_HEIGHT_LINES } from '../../hud/constants.js';
+import { DEFAULT_FRONTIER_MODEL } from '../../config/models.js';
 
 describe('normalizeCodexLaunchArgs', () => {
   it('maps --madmax to codex bypass flag', () => {
@@ -689,15 +690,15 @@ describe('team worker launch arg inheritance helpers', () => {
     );
   });
 
-  it('resolveTeamWorkerLaunchArgsEnv uses default model when env and inherited models are absent', () => {
+  it('resolveTeamWorkerLaunchArgsEnv uses frontier default model when env and inherited models are absent', () => {
     assert.equal(
       resolveTeamWorkerLaunchArgsEnv(
         '--no-alt-screen',
         ['--dangerously-bypass-approvals-and-sandbox'],
         true,
-        'gpt-5.3-codex'
+        DEFAULT_FRONTIER_MODEL
       ),
-      '--no-alt-screen --dangerously-bypass-approvals-and-sandbox --model gpt-5.3-codex'
+      `--no-alt-screen --dangerously-bypass-approvals-and-sandbox --model ${DEFAULT_FRONTIER_MODEL}`
     );
   });
 

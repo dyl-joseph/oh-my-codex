@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { getModelForMode, getTeamLowComplexityModel } from '../models.js';
+import { DEFAULT_FRONTIER_MODEL, getModelForMode, getTeamLowComplexityModel } from '../models.js';
 
 describe('getModelForMode', () => {
   let tempDir: string;
@@ -28,13 +28,13 @@ describe('getModelForMode', () => {
     await writeFile(join(tempDir, '.omx-config.json'), JSON.stringify(config));
   }
 
-  it('returns hardcoded default when config file does not exist', () => {
-    assert.equal(getModelForMode('team'), 'gpt-5.3-codex');
+  it('returns frontier default when config file does not exist', () => {
+    assert.equal(getModelForMode('team'), DEFAULT_FRONTIER_MODEL);
   });
 
-  it('returns hardcoded default when config has no models section', async () => {
+  it('returns frontier default when config has no models section', async () => {
     await writeConfig({ notifications: { enabled: false } });
-    assert.equal(getModelForMode('team'), 'gpt-5.3-codex');
+    assert.equal(getModelForMode('team'), DEFAULT_FRONTIER_MODEL);
   });
 
   it('returns mode-specific model when configured', async () => {
@@ -47,9 +47,9 @@ describe('getModelForMode', () => {
     assert.equal(getModelForMode('team'), 'o4-mini');
   });
 
-  it('returns hardcoded default when models section is empty', async () => {
+  it('returns frontier default when models section is empty', async () => {
     await writeConfig({ models: {} });
-    assert.equal(getModelForMode('team'), 'gpt-5.3-codex');
+    assert.equal(getModelForMode('team'), DEFAULT_FRONTIER_MODEL);
   });
 
   it('ignores empty string values and falls back to default', async () => {
@@ -69,14 +69,14 @@ describe('getModelForMode', () => {
     assert.equal(getModelForMode('ralph'), 'gpt-5');
   });
 
-  it('returns hardcoded default for invalid models section (array)', async () => {
+  it('returns frontier default for invalid models section (array)', async () => {
     await writeConfig({ models: ['not', 'valid'] });
-    assert.equal(getModelForMode('team'), 'gpt-5.3-codex');
+    assert.equal(getModelForMode('team'), DEFAULT_FRONTIER_MODEL);
   });
 
-  it('returns hardcoded default for malformed JSON', async () => {
+  it('returns frontier default for malformed JSON', async () => {
     await writeFile(join(tempDir, '.omx-config.json'), 'not-json');
-    assert.equal(getModelForMode('team'), 'gpt-5.3-codex');
+    assert.equal(getModelForMode('team'), DEFAULT_FRONTIER_MODEL);
   });
 
   it('returns low-complexity team model when configured', async () => {

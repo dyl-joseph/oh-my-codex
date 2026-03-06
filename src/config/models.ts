@@ -11,7 +11,7 @@
  *   }
  * }
  *
- * Resolution: mode-specific > "default" key > 'gpt-5.3-codex' (hardcoded fallback)
+ * Resolution: mode-specific > "default" key > DEFAULT_FRONTIER_MODEL (hardcoded fallback)
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -36,16 +36,17 @@ function readModelsBlock(codexHomeOverride?: string): ModelsConfig | null {
   }
 }
 
-export const HARDCODED_DEFAULT_MODEL = 'gpt-5.3-codex';
+export const DEFAULT_FRONTIER_MODEL = 'gpt-5.4';
+export const HARDCODED_DEFAULT_MODEL = DEFAULT_FRONTIER_MODEL;
 export const HARDCODED_TEAM_LOW_COMPLEXITY_MODEL = 'gpt-5.3-codex-spark';
 
 /**
  * Get the configured model for a specific mode.
- * Resolution: mode-specific override > "default" key > 'gpt-5.3-codex'
+ * Resolution: mode-specific override > "default" key > DEFAULT_FRONTIER_MODEL
  */
 export function getModelForMode(mode: string, codexHomeOverride?: string): string {
   const models = readModelsBlock(codexHomeOverride);
-  if (!models) return HARDCODED_DEFAULT_MODEL;
+  if (!models) return DEFAULT_FRONTIER_MODEL;
 
   const modeValue = models[mode];
   if (typeof modeValue === 'string' && modeValue.trim() !== '') {
@@ -57,7 +58,7 @@ export function getModelForMode(mode: string, codexHomeOverride?: string): strin
     return defaultValue.trim();
   }
 
-  return HARDCODED_DEFAULT_MODEL;
+  return DEFAULT_FRONTIER_MODEL;
 }
 
 const TEAM_LOW_COMPLEXITY_MODEL_KEYS = [
