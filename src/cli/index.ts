@@ -55,6 +55,7 @@ import {
   buildUnregisterResizeHookArgs,
   enableMouseScrolling,
   isNativeWindows,
+  isTmuxAvailable,
   isWsl2,
 } from '../team/tmux-session.js';
 import { getPackageRoot } from '../utils/package.js';
@@ -534,14 +535,15 @@ async function reasoningCommand(args: string[]): Promise<void> {
 
 export async function launchWithHud(args: string[]): Promise<void> {
   // ── Win32 guard ──────────────────────────────────────────────────────
-  if (isNativeWindows()) {
+  if (isNativeWindows() && !isTmuxAvailable()) {
     console.error(
-      '[omx] OMX requires tmux, which is not available on native Windows.\n' +
-      '[omx] Please use one of the following supported environments:\n' +
-      '[omx]   - WSL2 (Windows Subsystem for Linux 2)\n' +
-      '[omx]   - macOS\n' +
-      '[omx]   - Linux\n' +
-      '[omx] See: https://docs.microsoft.com/en-us/windows/wsl/install',
+      '[omx] OMX requires tmux, which was not found on this system.\n' +
+      '[omx] Install a tmux provider for your platform:\n' +
+      '[omx]   - Windows: winget install psmux  (native tmux for Windows)\n' +
+      '[omx]   - WSL2: sudo apt install tmux\n' +
+      '[omx]   - macOS: brew install tmux\n' +
+      '[omx]   - Linux: sudo apt install tmux\n' +
+      '[omx] See: https://github.com/marlocarlo/psmux',
     );
     process.exitCode = 1;
     return;

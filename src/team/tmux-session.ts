@@ -547,9 +547,10 @@ function commandExists(binary: string): boolean {
  * Returns the absolute path or the bare command name as fallback.
  */
 function resolveAbsoluteBinaryPath(binary: string): string {
-  const result = spawnSync('which', [binary], { encoding: 'utf-8', timeout: 5000 });
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(finder, [binary], { encoding: 'utf-8', timeout: 5000 });
   if (result.status === 0 && result.stdout.trim()) {
-    return result.stdout.trim();
+    return result.stdout.trim().split('\n')[0];
   }
   return binary;
 }

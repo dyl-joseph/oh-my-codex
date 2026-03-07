@@ -176,7 +176,8 @@ function extractSymbols(content: string): DocumentSymbol[] {
 async function findSgBinary(): Promise<string | null> {
   for (const bin of ['sg', 'ast-grep']) {
     try {
-      await execFileAsync('which', [bin]);
+      const finder = process.platform === 'win32' ? 'where' : 'which';
+      await execFileAsync(finder, [bin]);
       return bin;
     } catch (err) {
       process.stderr.write(`[code-intel-server] operation failed: ${err}\n`);

@@ -71,10 +71,24 @@ omx team 2:explore "short scoped analysis task"
 
 ## Requirements
 
-- macOS or Linux (Windows via WSL2)
 - Node.js >= 20 (CI validates Node 20 and current LTS, currently Node 22)
 - Codex CLI installed (`npm install -g @openai/codex`)
 - Codex auth configured
+
+### Platform & tmux
+
+OMX features like `omx team` require **tmux**:
+
+| Platform       | tmux provider                                            | Install                |
+| -------------- | -------------------------------------------------------- | ---------------------- |
+| macOS          | [tmux](https://github.com/tmux/tmux)                    | `brew install tmux`    |
+| Ubuntu/Debian  | tmux                                                     | `sudo apt install tmux`|
+| Fedora         | tmux                                                     | `sudo dnf install tmux`|
+| Arch           | tmux                                                     | `sudo pacman -S tmux`  |
+| Windows        | [psmux](https://github.com/marlocarlo/psmux) (native)   | `winget install psmux` |
+| Windows (WSL2) | tmux (inside WSL)                                        | `sudo apt install tmux`|
+
+> **Windows users:** [psmux](https://github.com/marlocarlo/psmux) provides a native `tmux` binary for Windows with 76 tmux-compatible commands. No WSL required.
 
 ## Quickstart (3 minutes)
 
