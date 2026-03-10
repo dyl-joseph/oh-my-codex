@@ -14,4 +14,3 @@ dist/
 .codex/
 .agents/
 coverage/
-target/
