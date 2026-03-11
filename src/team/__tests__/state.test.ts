@@ -125,6 +125,15 @@ describe('team state', () => {
       const loaded = await readTeamManifestV2('team-policy', cwd);
       assert.equal(loaded?.policy.dispatch_mode, 'hook_preferred_with_fallback');
       assert.equal(loaded?.policy.dispatch_ack_timeout_ms, 10_000);
+
+      const freshCwd = await mkdtemp(join(tmpdir(), 'omx-team-manifest-policy-default-'));
+      try {
+        await initTeamState('team-policy-default', 't', 'executor', 1, freshCwd);
+        const fresh = await readTeamManifestV2('team-policy-default', freshCwd);
+        assert.equal(fresh?.policy.dispatch_ack_timeout_ms, 2_000);
+      } finally {
+        await rm(freshCwd, { recursive: true, force: true });
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

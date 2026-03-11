@@ -8,6 +8,11 @@ import { homedir } from 'os';
 import { drainPendingTeamDispatch } from './notify-hook/team-dispatch.js';
 import { resolveNudgePaneTarget } from './notify-hook/auto-nudge.js';
 import { checkPaneReadyForTeamSendKeys } from './notify-hook/team-tmux-guard.js';
+import {
+  isLeaderStale,
+  maybeNudgeTeamLeader,
+  resolveLeaderStalenessThresholdMs,
+} from './notify-hook/team-leader-nudge.js';
 import { DEFAULT_MARKER } from './tmux-hook-engine.js';
 
 function argValue(name, fallback = '') {
@@ -38,7 +43,10 @@ function isPidAlive(pid) {
 const cwd = resolve(argValue('--cwd', process.cwd()));
 const notifyScript = resolve(argValue('--notify-script', join(cwd, 'scripts', 'notify-hook.js')));
 const runOnce = process.argv.includes('--once');
-const pollMs = Math.max(50, asNumber(argValue('--poll-ms', '700'), 700));
+// Keep fallback control-plane ticks comfortably below the default dispatch
+// ack budget so leaderless team dispatch + stale-alert recovery do not feel
+// laggy between native notify-hook turns.
+const pollMs = Math.max(50, asNumber(argValue('--poll-ms', '250'), 250));
 const parentPid = Math.trunc(asNumber(argValue('--parent-pid', String(process.ppid || 0)), process.ppid || 0));
 const startedAt = Date.now();
 const fileWindowMs = runOnce ? 15000 : 30000;
@@ -73,6 +81,15 @@ let lastDispatchDrain = {
   leader_only: safeString(process.env.OMX_TEAM_WORKER || '').trim() === '',
   last_tick_at: null,
   last_result: null,
+  last_error: null,
+};
+let leaderNudgeRuns = 0;
+let lastLeaderNudge = {
+  enabled: true,
+  leader_only: safeString(process.env.OMX_TEAM_WORKER || '').trim() === '',
+  stale_threshold_ms: null,
+  precomputed_leader_stale: null,
+  last_tick_at: null,
   last_error: null,
 };
 let lastRalphContinueSteer = {
@@ -317,6 +334,11 @@ async function writeState(extra = {}) {
       run_count: dispatchDrainRuns,
       ...lastDispatchDrain,
     },
+    leader_nudge: {
+      enabled: true,
+      run_count: leaderNudgeRuns,
+      ...lastLeaderNudge,
+    },
     ralph_continue_steer: {
       ...lastRalphContinueSteer,
       enabled: true,
@@ -512,6 +534,72 @@ async function pollFiles() {
   }
 }
 
+async function runLeaderNudgeTick() {
+  const startedIso = new Date().toISOString();
+  const leaderOnly = safeString(process.env.OMX_TEAM_WORKER || '').trim() === '';
+  const staleThresholdMs = resolveLeaderStalenessThresholdMs();
+
+  if (!leaderOnly) {
+    leaderNudgeRuns += 1;
+    lastLeaderNudge = {
+      enabled: true,
+      leader_only: false,
+      stale_threshold_ms: staleThresholdMs,
+      precomputed_leader_stale: null,
+      last_tick_at: startedIso,
+      last_error: 'worker_context',
+    };
+    await eventLog({
+      type: 'leader_nudge_tick',
+      leader_only: false,
+      run_count: leaderNudgeRuns,
+      reason: 'worker_context',
+      stale_threshold_ms: staleThresholdMs,
+    });
+    return;
+  }
+
+  try {
+    const preComputedLeaderStale = await isLeaderStale(stateDir, staleThresholdMs, Date.now());
+    await maybeNudgeTeamLeader({ cwd, stateDir, logsDir, preComputedLeaderStale });
+    leaderNudgeRuns += 1;
+    lastLeaderNudge = {
+      enabled: true,
+      leader_only: true,
+      stale_threshold_ms: staleThresholdMs,
+      precomputed_leader_stale: preComputedLeaderStale,
+      last_tick_at: startedIso,
+      last_error: null,
+    };
+    await eventLog({
+      type: 'leader_nudge_tick',
+      leader_only: true,
+      run_count: leaderNudgeRuns,
+      stale_threshold_ms: staleThresholdMs,
+      precomputed_leader_stale: preComputedLeaderStale,
+      reason: 'leader_nudge_checked',
+    });
+  } catch (err) {
+    leaderNudgeRuns += 1;
+    lastLeaderNudge = {
+      enabled: true,
+      leader_only: true,
+      stale_threshold_ms: staleThresholdMs,
+      precomputed_leader_stale: null,
+      last_tick_at: startedIso,
+      last_error: err instanceof Error ? err.message : safeString(err),
+    };
+    await eventLog({
+      type: 'leader_nudge_tick',
+      leader_only: true,
+      run_count: leaderNudgeRuns,
+      stale_threshold_ms: staleThresholdMs,
+      reason: 'leader_nudge_failed',
+      error: lastLeaderNudge.last_error,
+    });
+  }
+}
+
 async function runDispatchDrainTick() {
   const startedIso = new Date().toISOString();
   try {
@@ -555,6 +643,7 @@ async function tick() {
   await ensureTrackedFiles();
   await pollFiles();
   await runDispatchDrainTick();
+  await runLeaderNudgeTick();
   await runRalphContinueSteerTick();
   await writeState();
   if (await enforceLifecycleGuards()) return;
@@ -597,6 +686,7 @@ async function main() {
     await ensureTrackedFiles();
     await pollFiles();
     await runDispatchDrainTick();
+    await runLeaderNudgeTick();
     await runRalphContinueSteerTick();
     await writeState();
     await eventLog({ type: 'watcher_once_complete', seen_turns: seenTurnKeys.size });

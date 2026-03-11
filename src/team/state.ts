@@ -336,7 +336,10 @@ export interface TeamSummaryPerformance {
 export const DEFAULT_MAX_WORKERS = 20;
 export const ABSOLUTE_MAX_WORKERS = 20;
 const LOCK_STALE_MS = 5 * 60 * 1000;
-const DEFAULT_DISPATCH_ACK_TIMEOUT_MS = 800;
+// Hook-preferred delivery can wait for the fallback watcher tick plus tmux
+// injection verification; keep the default ack budget above that steady-state
+// control-plane cadence to avoid spurious fallback/failed confirmations.
+const DEFAULT_DISPATCH_ACK_TIMEOUT_MS = 2_000;
 const MIN_DISPATCH_ACK_TIMEOUT_MS = 100;
 const MAX_DISPATCH_ACK_TIMEOUT_MS = 10_000;
 
