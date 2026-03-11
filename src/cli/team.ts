@@ -366,6 +366,7 @@ async function readTeamPaneStatus(
   recommended_inspect_approval_reviewers: Record<string, string | null>;
   recommended_inspect_approval_reasons: Record<string, string | null>;
   recommended_inspect_approval_decided_at: Record<string, string | null>;
+  recommended_inspect_approval_record_present: Record<string, boolean | null>;
   recommended_inspect_states: Record<string, WorkerStatus['state'] | null>;
   recommended_inspect_state_reasons: Record<string, string | null>;
   recommended_inspect_tasks: Record<string, string | null>;
@@ -411,6 +412,7 @@ async function readTeamPaneStatus(
     approval_reviewer: string | null;
     approval_reason: string | null;
     approval_decided_at: string | null;
+    approval_record_present: boolean | null;
     reason: string;
     state: WorkerStatus['state'] | null;
     state_reason: string | null;
@@ -462,6 +464,7 @@ async function readTeamPaneStatus(
       recommended_inspect_approval_reviewers: {},
       recommended_inspect_approval_reasons: {},
       recommended_inspect_approval_decided_at: {},
+      recommended_inspect_approval_record_present: {},
       recommended_inspect_states: {},
       recommended_inspect_state_reasons: {},
       recommended_inspect_tasks: {},
@@ -738,6 +741,12 @@ async function readTeamPaneStatus(
       return [target, taskId ? (approvalRecordByTaskId.get(taskId)?.decided_at ?? null) : null];
     }),
   );
+  const recommendedInspectApprovalRecordPresent = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const taskId = recommendedInspectTasks[target];
+      return [target, taskId ? approvalRecordByTaskId.get(taskId) !== null : null];
+    }),
+  );
   const recommendedInspectPanes = Object.fromEntries(
     recommendedInspectTargets.map((target) => [target, workerPanes[target] ?? null]),
   );
@@ -828,6 +837,7 @@ async function readTeamPaneStatus(
         approval_reviewer: recommendedInspectApprovalReviewers[target] ?? null,
         approval_reason: recommendedInspectApprovalReasons[target] ?? null,
         approval_decided_at: recommendedInspectApprovalDecidedAt[target] ?? null,
+        approval_record_present: recommendedInspectApprovalRecordPresent[target] ?? null,
         reason: recommendedInspectReasons[target] ?? 'unknown',
         state: recommendedInspectStates[target] ?? null,
         state_reason: recommendedInspectStateReasons[target] ?? null,
@@ -882,6 +892,7 @@ async function readTeamPaneStatus(
     recommended_inspect_approval_reviewers: recommendedInspectApprovalReviewers,
     recommended_inspect_approval_reasons: recommendedInspectApprovalReasons,
     recommended_inspect_approval_decided_at: recommendedInspectApprovalDecidedAt,
+    recommended_inspect_approval_record_present: recommendedInspectApprovalRecordPresent,
     recommended_inspect_states: recommendedInspectStates,
     recommended_inspect_state_reasons: recommendedInspectStateReasons,
     recommended_inspect_tasks: recommendedInspectTasks,
@@ -1086,6 +1097,11 @@ function renderTeamPaneStatus(
       console.log(`inspect_approval_decided_at_${target}: ${approvalDecidedAt}`);
     }
   }
+  for (const [target, approvalRecordPresent] of Object.entries(paneStatus.recommended_inspect_approval_record_present)) {
+    if (typeof approvalRecordPresent === 'boolean') {
+      console.log(`inspect_approval_record_present_${target}: ${approvalRecordPresent}`);
+    }
+  }
   for (const [target, state] of Object.entries(paneStatus.recommended_inspect_states)) {
     if (state) {
       console.log(`inspect_state_${target}: ${state}`);
@@ -1162,11 +1178,14 @@ function renderTeamPaneStatus(
     const approvalReviewerPart = item.approval_reviewer ? ` approval_reviewer=${item.approval_reviewer}` : '';
     const approvalReasonPart = item.approval_reason ? ` approval_reason=${item.approval_reason}` : '';
     const approvalDecidedAtPart = item.approval_decided_at ? ` approval_decided_at=${item.approval_decided_at}` : '';
+    const approvalRecordPresentPart = typeof item.approval_record_present === 'boolean'
+      ? ` approval_record_present=${item.approval_record_present}`
+      : '';
     const statePart = item.state ? ` state=${item.state}` : '';
     const stateReasonPart = item.state_reason ? ` state_reason=${item.state_reason}` : '';
     const taskPart = item.task_id ? ` task=${item.task_id}` : '';
     const subjectPart = item.task_subject ? ` subject=${item.task_subject}` : '';
-    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${taskResultPart}${taskErrorPart}${taskVersionPart}${taskCreatedAtPart}${taskCompletedAtPart}${taskDependsOnPart}${taskClaimOwnerPart}${taskClaimTokenPart}${taskClaimLeasePart}${approvalRequiredPart}${requiresCodeChangePart}${taskDescriptionPart}${blockedByPart}${taskRolePart}${taskOwnerPart}${approvalStatusPart}${approvalReviewerPart}${approvalReasonPart}${approvalDecidedAtPart} reason=${item.reason}${statePart}${stateReasonPart}${taskPart}${subjectPart} command=${item.command}`);
+    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${taskResultPart}${taskErrorPart}${taskVersionPart}${taskCreatedAtPart}${taskCompletedAtPart}${taskDependsOnPart}${taskClaimOwnerPart}${taskClaimTokenPart}${taskClaimLeasePart}${approvalRequiredPart}${requiresCodeChangePart}${taskDescriptionPart}${blockedByPart}${taskRolePart}${taskOwnerPart}${approvalStatusPart}${approvalReviewerPart}${approvalReasonPart}${approvalDecidedAtPart}${approvalRecordPresentPart} reason=${item.reason}${statePart}${stateReasonPart}${taskPart}${subjectPart} command=${item.command}`);
   }
 
   for (const [target, command] of Object.entries(paneStatus.sparkshell_commands)) {
