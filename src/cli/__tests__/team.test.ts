@@ -608,6 +608,55 @@ describe('teamCommand api', () => {
 });
 
 
+describe('teamCommand status', () => {
+  it('prints pane ids and sparkshell hint when tmux panes are recorded', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-team-status-panes-'));
+    const previousCwd = process.cwd();
+    const logs: string[] = [];
+    const originalLog = console.log;
+    try {
+      process.chdir(wd);
+      const config = await initTeamState('pane-team', 'inspect worker panes', 'executor', 2, wd);
+      config.leader_pane_id = '%10';
+      config.hud_pane_id = '%11';
+      config.workers[0]!.pane_id = '%21';
+      config.workers[1]!.pane_id = '%22';
+      const manifestPath = join(wd, '.omx', 'state', 'team', 'pane-team', 'manifest.v2.json');
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as {
+        leader_pane_id?: string | null;
+        hud_pane_id?: string | null;
+        workers?: Array<{ pane_id?: string }>;
+      };
+      manifest.leader_pane_id = config.leader_pane_id;
+      manifest.hud_pane_id = config.hud_pane_id;
+      manifest.workers = config.workers.map((worker) => ({
+        ...worker,
+        pane_id: worker.pane_id,
+      }));
+      await writeFile(
+        join(wd, '.omx', 'state', 'team', 'pane-team', 'config.json'),
+        `${JSON.stringify(config, null, 2)}\n`,
+      );
+      await writeFile(
+        manifestPath,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      );
+
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+      await teamCommand(['status', 'pane-team']);
+
+      const output = logs.join('\n');
+      assert.match(output, /panes: leader=%10 hud=%11/);
+      assert.match(output, /worker_panes: worker-1=%21 worker-2=%22/);
+      assert.match(output, /sparkshell_hint: omx sparkshell --tmux-pane <pane-id> --tail-lines 400/);
+    } finally {
+      console.log = originalLog;
+      process.chdir(previousCwd);
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('teamCommand await', () => {
   it('returns next canonical event for a team in JSON mode', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-team-await-'));

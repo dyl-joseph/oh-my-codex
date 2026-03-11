@@ -283,6 +283,30 @@ function buildDeadWorkerAwaitEvent(teamName: string, snapshot: TeamSnapshot): Te
   };
 }
 
+function renderTeamPaneStatus(
+  config: Awaited<ReturnType<typeof readTeamConfig>>,
+): void {
+  if (!config) return;
+
+  const leaderPaneId = config.leader_pane_id?.trim();
+  const hudPaneId = config.hud_pane_id?.trim();
+  if (leaderPaneId || hudPaneId) {
+    console.log(`panes: leader=${leaderPaneId || '-'} hud=${hudPaneId || '-'}`);
+  }
+
+  const workerPanePairs = config.workers
+    .map((worker) => {
+      const paneId = worker.pane_id?.trim();
+      return paneId ? `${worker.name}=${paneId}` : '';
+    })
+    .filter(Boolean);
+
+  if (workerPanePairs.length > 0) {
+    console.log(`worker_panes: ${workerPanePairs.join(' ')}`);
+    console.log('sparkshell_hint: omx sparkshell --tmux-pane <pane-id> --tail-lines 400');
+  }
+}
+
 function parseTeamArgs(args: string[]): ParsedTeamArgs {
   const tokens = [...args];
   let ralph = false;
@@ -745,6 +769,7 @@ export async function teamCommand(args: string[], options: TeamCliOptions = {}):
         `monitor_perf_ms: total=${snapshot.performance.total_ms} list=${snapshot.performance.list_tasks_ms} workers=${snapshot.performance.worker_scan_ms} mailbox=${snapshot.performance.mailbox_delivery_ms}`
       );
     }
+    renderTeamPaneStatus(await readTeamConfig(name, cwd));
     return;
   }
 
