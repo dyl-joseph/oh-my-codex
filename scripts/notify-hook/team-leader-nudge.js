@@ -55,8 +55,30 @@ export function resolveLeaderProgressStallThresholdMs() {
 
 function buildStatusCheckReminder(teamName, { keepPolling = false } = {}) {
   return keepPolling
-    ? `Check: omx team status ${teamName}; keep polling.`
-    : `Check: omx team status ${teamName}.`;
+    ? `Next: omx team status ${teamName}; keep polling.`
+    : `Next: omx team status ${teamName}.`;
+}
+
+function buildLeaderActionGuidance(teamName, {
+  allWorkersIdle = false,
+  workerPanesAlive = false,
+  taskCounts = {},
+} = {}) {
+  const pending = Number.isFinite(taskCounts.pending) ? taskCounts.pending : 0;
+  const blocked = Number.isFinite(taskCounts.blocked) ? taskCounts.blocked : 0;
+  const inProgress = Number.isFinite(taskCounts.in_progress) ? taskCounts.in_progress : 0;
+  const tasksComplete = pending === 0 && blocked === 0 && inProgress === 0;
+  const pendingFollowUpTasks = allWorkersIdle && pending > 0 && blocked === 0 && inProgress === 0;
+
+  if (pendingFollowUpTasks) {
+    return workerPanesAlive
+      ? 'Next: reuse this team with a follow-up task.'
+      : 'Next: launch a new team for the next task set.';
+  }
+  if (allWorkersIdle && tasksComplete) {
+    return `Next: omx team shutdown ${teamName}.`;
+  }
+  return buildStatusCheckReminder(teamName, { keepPolling: true });
 }
 
 export async function checkWorkerPanesAlive(tmuxTarget, workerPaneIds = []) {
@@ -498,6 +520,11 @@ export async function maybeNudgeTeamLeader({ cwd, stateDir, logsDir, preComputed
       : [];
     const allWorkersIdle = workerStates.length > 0 && workerStates.every((state) => state === 'idle' || state === 'done');
     const progressSnapshot = await readTeamProgressSnapshot(stateDir, teamName, workerNames);
+    const leaderActionGuidance = buildLeaderActionGuidance(teamName, {
+      allWorkersIdle,
+      workerPanesAlive: paneStatus.alive,
+      taskCounts: progressSnapshot.taskCounts,
+    });
     const prevProgress = nudgeState.progress_by_team[teamName] && typeof nudgeState.progress_by_team[teamName] === 'object'
       ? nudgeState.progress_by_team[teamName]
       : {};
@@ -562,7 +589,7 @@ export async function maybeNudgeTeamLeader({ cwd, stateDir, logsDir, preComputed
     if (shouldSendAllIdleNudge) {
       nudgeReason = 'all_workers_idle';
       const N = workerNames.length;
-      text = `[OMX] All ${N} worker${N === 1 ? '' : 's'} idle. Ready for next instructions.`;
+      text = `[OMX] All ${N} worker${N === 1 ? '' : 's'} idle. ${leaderActionGuidance}`;
     } else if (ackWithoutStartEvidence) {
       nudgeReason = ACK_WITHOUT_START_EVIDENCE_REASON;
       text =
@@ -578,21 +605,21 @@ export async function maybeNudgeTeamLeader({ cwd, stateDir, logsDir, preComputed
       const stallPrefix = leaderStale ? 'leader stale, ' : 'worker panes stalled, ';
       text =
         `Team ${teamName}: ${stallPrefix}no team progress for ${formatDurationMs(stalledForMs)}. `
-        + `${buildStatusCheckReminder(teamName, { keepPolling: true })} `
+        + `${leaderActionGuidance} `
         + `(pending:${pending} in_progress:${in_progress} blocked:${blocked}${missingSignals})`;
     } else if (stalePanesNudge && hasNewMessage) {
       nudgeReason = 'stale_leader_with_messages';
       text =
         `Team ${teamName}: leader stale, ${paneStatus.paneCount} pane(s) active, ${messages.length} msg(s) pending. `
-        + buildStatusCheckReminder(teamName, { keepPolling: true });
+        + leaderActionGuidance;
     } else if (staleFollowupDue) {
       nudgeReason = 'stale_leader_panes_alive';
       text =
         `Team ${teamName}: leader stale, ${paneStatus.paneCount} worker pane(s) still active. `
-        + buildStatusCheckReminder(teamName, { keepPolling: true });
+        + leaderActionGuidance;
     } else if (hasNewMessage) {
       nudgeReason = 'new_mailbox_message';
-      text = `Team ${teamName}: ${messages.length} msg(s) for leader. ${buildStatusCheckReminder(teamName)}`;
+      text = `Team ${teamName}: ${messages.length} msg(s) for leader. ${leaderActionGuidance}`;
     } else {
       continue;
     }

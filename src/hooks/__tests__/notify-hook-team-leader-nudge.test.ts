@@ -162,6 +162,203 @@ describe('notify-hook team leader nudge', () => {
     });
   });
 
+  it('suggests shutdown when all workers are idle and the current task set is complete', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'idle-shutdown';
+      const teamDir = join(stateDir, 'team', teamName);
+      const workersDir = join(teamDir, 'workers');
+      const tasksDir = join(teamDir, 'tasks');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+      const nowIso = new Date().toISOString();
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(workersDir, { recursive: true });
+      await mkdir(tasksDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'idle-shutdown:0',
+        leader_pane_id: '%96',
+        workers: [
+          { name: 'worker-1', index: 1, pane_id: '%10', role: 'executor' },
+          { name: 'worker-2', index: 2, pane_id: '%11', role: 'executor' },
+        ],
+      });
+      await writeJson(join(stateDir, 'hud-state.json'), {
+        last_turn_at: nowIso,
+        turn_count: 1,
+      });
+      await writeJson(join(tasksDir, 'task-1.json'), {
+        id: '1',
+        subject: 'Done',
+        description: 'completed work item',
+        status: 'completed',
+        owner: 'worker-1',
+        created_at: nowIso,
+      });
+      for (const worker of ['worker-1', 'worker-2']) {
+        await mkdir(join(workersDir, worker), { recursive: true });
+        await writeJson(join(workersDir, worker, 'status.json'), {
+          state: 'idle',
+          updated_at: nowIso,
+        });
+      }
+
+      await writeFile(fakeTmuxPath, buildFakeTmuxWithListPanes(tmuxLogPath, ['%10 12345', '%11 12346']));
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir);
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+      assert.match(tmuxLog, /\[OMX\] All 2 workers idle/);
+      assert.match(tmuxLog, /Next: omx team shutdown idle-shutdown/);
+      assert.doesNotMatch(tmuxLog, /keep polling/);
+    });
+  });
+
+  it('suggests reusing the team when follow-up tasks are pending and worker panes are still reusable', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'idle-followup-reuse';
+      const teamDir = join(stateDir, 'team', teamName);
+      const workersDir = join(teamDir, 'workers');
+      const tasksDir = join(teamDir, 'tasks');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+      const nowIso = new Date().toISOString();
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(workersDir, { recursive: true });
+      await mkdir(tasksDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'idle-followup-reuse:0',
+        leader_pane_id: '%97',
+        workers: [
+          { name: 'worker-1', index: 1, pane_id: '%10', role: 'executor' },
+          { name: 'worker-2', index: 2, pane_id: '%11', role: 'executor' },
+        ],
+      });
+      await writeJson(join(stateDir, 'hud-state.json'), {
+        last_turn_at: nowIso,
+        turn_count: 1,
+      });
+      await writeJson(join(tasksDir, 'task-2.json'), {
+        id: '2',
+        subject: 'Follow-up',
+        description: 'queued follow-up task',
+        status: 'pending',
+        created_at: nowIso,
+      });
+      for (const worker of ['worker-1', 'worker-2']) {
+        await mkdir(join(workersDir, worker), { recursive: true });
+        await writeJson(join(workersDir, worker, 'status.json'), {
+          state: 'idle',
+          updated_at: nowIso,
+        });
+      }
+
+      await writeFile(fakeTmuxPath, buildFakeTmuxWithListPanes(tmuxLogPath, ['%10 12345', '%11 12346']));
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir);
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+      assert.match(tmuxLog, /\[OMX\] All 2 workers idle/);
+      assert.match(tmuxLog, /Next: reuse this team with a follow-up task/);
+      assert.doesNotMatch(tmuxLog, /launch a new team/);
+      assert.doesNotMatch(tmuxLog, /omx team shutdown/);
+    });
+  });
+
+  it('suggests launching a new team when follow-up tasks are pending but worker panes are no longer reusable', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'idle-followup-relaunch';
+      const teamDir = join(stateDir, 'team', teamName);
+      const workersDir = join(teamDir, 'workers');
+      const tasksDir = join(teamDir, 'tasks');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+      const nowIso = new Date().toISOString();
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(workersDir, { recursive: true });
+      await mkdir(tasksDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'idle-followup-relaunch:0',
+        leader_pane_id: '%98',
+        workers: [
+          { name: 'worker-1', index: 1, pane_id: '%10', role: 'executor' },
+          { name: 'worker-2', index: 2, pane_id: '%11', role: 'executor' },
+        ],
+      });
+      await writeJson(join(stateDir, 'hud-state.json'), {
+        last_turn_at: nowIso,
+        turn_count: 1,
+      });
+      await writeJson(join(tasksDir, 'task-2.json'), {
+        id: '2',
+        subject: 'Follow-up',
+        description: 'queued follow-up task',
+        status: 'pending',
+        created_at: nowIso,
+      });
+      for (const worker of ['worker-1', 'worker-2']) {
+        await mkdir(join(workersDir, worker), { recursive: true });
+        await writeJson(join(workersDir, worker, 'status.json'), {
+          state: 'idle',
+          updated_at: nowIso,
+        });
+      }
+
+      await writeFile(fakeTmuxPath, buildFakeTmuxWithListPanes(tmuxLogPath, ['%98 12349']));
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir);
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+      assert.match(tmuxLog, /\[OMX\] All 2 workers idle/);
+      assert.match(tmuxLog, /Next: launch a new team for the next task set/);
+      assert.doesNotMatch(tmuxLog, /reuse this team with a follow-up task/);
+    });
+  });
+
   it('falls back to global team-state when session-scoped state is active but team-state.json remains global', async () => {
     await withTempWorkingDir(async (cwd) => {
       const omxDir = join(cwd, '.omx');
@@ -596,7 +793,7 @@ exit 0
       assert.match(tmuxLog, /Team beta:/);
       assert.match(tmuxLog, /leader stale/);
       assert.match(tmuxLog, /pane\(s\) still active/);
-      assert.match(tmuxLog, /Check: omx team status beta/);
+      assert.match(tmuxLog, /Next: omx team status beta/);
       assert.match(tmuxLog, /keep polling/);
       assert.match(tmuxLog, /\[OMX_TMUX_INJECT\]/, 'should include injection marker');
     });
@@ -716,7 +913,7 @@ exit 0
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
       assert.match(tmuxLog, /Team stalled-progress: leader stale, no team progress for 3m/);
-      assert.match(tmuxLog, /Check: omx team status stalled-progress/);
+      assert.match(tmuxLog, /Next: omx team status stalled-progress/);
       assert.match(tmuxLog, /keep polling/);
       assert.match(tmuxLog, /pending:1 in_progress:1 blocked:0/);
       assert.match(tmuxLog, /1 worker signal missing/);
@@ -843,7 +1040,7 @@ exit 0
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
       assert.match(tmuxLog, /Team stalled-before-stale: worker panes stalled, no team progress for 3m/);
-      assert.match(tmuxLog, /Check: omx team status stalled-before-stale/);
+      assert.match(tmuxLog, /Next: omx team status stalled-before-stale/);
       assert.match(tmuxLog, /keep polling/);
       assert.doesNotMatch(tmuxLog, /leader stale/);
       assert.match(tmuxLog, /pending:1 in_progress:1 blocked:0/);
@@ -1413,7 +1610,7 @@ exit 0
       const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
       assert.match(tmuxLog, /leader stale/);
       assert.match(tmuxLog, /msg\(s\) pending/);
-      assert.match(tmuxLog, /Check: omx team status delta/);
+      assert.match(tmuxLog, /Next: omx team status delta/);
       assert.match(tmuxLog, /keep polling/);
       assert.match(tmuxLog, /\[OMX_TMUX_INJECT\]/, 'should include injection marker');
 
