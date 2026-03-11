@@ -346,6 +346,7 @@ function readTeamPaneStatus(
   recommended_inspect_workdirs: Record<string, string | null>;
   recommended_inspect_assigned_tasks: Record<string, string[]>;
   recommended_inspect_task_statuses: Record<string, TeamTask['status'] | null>;
+  recommended_inspect_requires_code_change: Record<string, boolean | null>;
   recommended_inspect_states: Record<string, WorkerStatus['state'] | null>;
   recommended_inspect_tasks: Record<string, string | null>;
   recommended_inspect_subjects: Record<string, string | null>;
@@ -371,6 +372,7 @@ function readTeamPaneStatus(
     working_dir: string | null;
     assigned_tasks: string[];
     task_status: TeamTask['status'] | null;
+    requires_code_change: boolean | null;
     reason: string;
     state: WorkerStatus['state'] | null;
     task_id: string | null;
@@ -402,6 +404,7 @@ function readTeamPaneStatus(
       recommended_inspect_workdirs: {},
       recommended_inspect_assigned_tasks: {},
       recommended_inspect_task_statuses: {},
+      recommended_inspect_requires_code_change: {},
       recommended_inspect_states: {},
       recommended_inspect_tasks: {},
       recommended_inspect_subjects: {},
@@ -539,10 +542,17 @@ function readTeamPaneStatus(
     }),
   );
   const taskStatusById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.status] as const));
+  const taskRequiresCodeChangeById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.requires_code_change ?? null] as const));
   const recommendedInspectTaskStatuses = Object.fromEntries(
     recommendedInspectTargets.map((target) => {
       const taskId = recommendedInspectTasks[target];
       return [target, taskId ? (taskStatusById.get(taskId) ?? null) : null];
+    }),
+  );
+  const recommendedInspectRequiresCodeChange = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const taskId = recommendedInspectTasks[target];
+      return [target, taskId ? (taskRequiresCodeChangeById.get(taskId) ?? null) : null];
     }),
   );
   const recommendedInspectPanes = Object.fromEntries(
@@ -610,6 +620,7 @@ function readTeamPaneStatus(
         working_dir: recommendedInspectWorkdirs[target] ?? null,
         assigned_tasks: recommendedInspectAssignedTasks[target] ?? [],
         task_status: recommendedInspectTaskStatuses[target] ?? null,
+        requires_code_change: recommendedInspectRequiresCodeChange[target] ?? null,
         reason: recommendedInspectReasons[target] ?? 'unknown',
         state: recommendedInspectStates[target] ?? null,
         task_id: recommendedInspectTasks[target] ?? null,
@@ -635,6 +646,7 @@ function readTeamPaneStatus(
       working_dir: string | null;
       assigned_tasks: string[];
       task_status: TeamTask['status'] | null;
+      requires_code_change: boolean | null;
       reason: string;
       state: WorkerStatus['state'] | null;
       task_id: string | null;
@@ -667,6 +679,7 @@ function readTeamPaneStatus(
     recommended_inspect_workdirs: recommendedInspectWorkdirs,
     recommended_inspect_assigned_tasks: recommendedInspectAssignedTasks,
     recommended_inspect_task_statuses: recommendedInspectTaskStatuses,
+    recommended_inspect_requires_code_change: recommendedInspectRequiresCodeChange,
     recommended_inspect_states: recommendedInspectStates,
     recommended_inspect_tasks: recommendedInspectTasks,
     recommended_inspect_subjects: recommendedInspectSubjects,
@@ -775,6 +788,11 @@ function renderTeamPaneStatus(
       console.log(`inspect_task_status_${target}: ${taskStatus}`);
     }
   }
+  for (const [target, requiresCodeChange] of Object.entries(paneStatus.recommended_inspect_requires_code_change)) {
+    if (typeof requiresCodeChange === 'boolean') {
+      console.log(`inspect_requires_code_change_${target}: ${requiresCodeChange}`);
+    }
+  }
   for (const [target, state] of Object.entries(paneStatus.recommended_inspect_states)) {
     if (state) {
       console.log(`inspect_state_${target}: ${state}`);
@@ -825,10 +843,13 @@ function renderTeamPaneStatus(
     const workdirPart = item.working_dir ? ` workdir=${item.working_dir}` : '';
     const assignedTasksPart = item.assigned_tasks.length > 0 ? ` assigned_tasks=${item.assigned_tasks.join(',')}` : '';
     const taskStatusPart = item.task_status ? ` task_status=${item.task_status}` : '';
+    const requiresCodeChangePart = typeof item.requires_code_change === 'boolean'
+      ? ` requires_code_change=${item.requires_code_change}`
+      : '';
     const statePart = item.state ? ` state=${item.state}` : '';
     const taskPart = item.task_id ? ` task=${item.task_id}` : '';
     const subjectPart = item.task_subject ? ` subject=${item.task_subject}` : '';
-    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
+    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${requiresCodeChangePart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
   }
 
   for (const [target, command] of Object.entries(paneStatus.sparkshell_commands)) {
