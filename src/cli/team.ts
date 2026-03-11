@@ -333,6 +333,7 @@ function readTeamPaneStatus(
   recommended_inspect_reasons: Record<string, string>;
   recommended_inspect_clis: Record<string, TeamWorkerCli | null>;
   recommended_inspect_roles: Record<string, string | null>;
+  recommended_inspect_alive: Record<string, boolean | null>;
   recommended_inspect_states: Record<string, WorkerStatus['state'] | null>;
   recommended_inspect_tasks: Record<string, string | null>;
   recommended_inspect_subjects: Record<string, string | null>;
@@ -344,6 +345,7 @@ function readTeamPaneStatus(
     pane_id: string;
     worker_cli: TeamWorkerCli | null;
     role: string | null;
+    alive: boolean | null;
     reason: string;
     state: WorkerStatus['state'] | null;
     task_id: string | null;
@@ -362,6 +364,7 @@ function readTeamPaneStatus(
       recommended_inspect_reasons: {},
       recommended_inspect_clis: {},
       recommended_inspect_roles: {},
+      recommended_inspect_alive: {},
       recommended_inspect_states: {},
       recommended_inspect_tasks: {},
       recommended_inspect_subjects: {},
@@ -419,6 +422,12 @@ function readTeamPaneStatus(
       return [target, worker?.role ?? null];
     }),
   );
+  const recommendedInspectAlive = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const worker = snapshot?.workers.find((candidate) => candidate.name === target);
+      return [target, worker?.alive ?? null];
+    }),
+  );
   const recommendedInspectTasks = Object.fromEntries(
     recommendedInspectTargets.map((target) => {
       const worker = snapshot?.workers.find((candidate) => candidate.name === target);
@@ -457,6 +466,7 @@ function readTeamPaneStatus(
         pane_id: paneId,
         worker_cli: recommendedInspectClis[target] ?? null,
         role: recommendedInspectRoles[target] ?? null,
+        alive: recommendedInspectAlive[target] ?? null,
         reason: recommendedInspectReasons[target] ?? 'unknown',
         state: recommendedInspectStates[target] ?? null,
         task_id: recommendedInspectTasks[target] ?? null,
@@ -469,6 +479,7 @@ function readTeamPaneStatus(
       pane_id: string;
       worker_cli: TeamWorkerCli | null;
       role: string | null;
+      alive: boolean | null;
       reason: string;
       state: WorkerStatus['state'] | null;
       task_id: string | null;
@@ -488,6 +499,7 @@ function readTeamPaneStatus(
     recommended_inspect_reasons: recommendedInspectReasons,
     recommended_inspect_clis: recommendedInspectClis,
     recommended_inspect_roles: recommendedInspectRoles,
+    recommended_inspect_alive: recommendedInspectAlive,
     recommended_inspect_states: recommendedInspectStates,
     recommended_inspect_tasks: recommendedInspectTasks,
     recommended_inspect_subjects: recommendedInspectSubjects,
@@ -530,6 +542,11 @@ function renderTeamPaneStatus(
       console.log(`inspect_role_${target}: ${role}`);
     }
   }
+  for (const [target, alive] of Object.entries(paneStatus.recommended_inspect_alive)) {
+    if (typeof alive === 'boolean') {
+      console.log(`inspect_alive_${target}: ${alive}`);
+    }
+  }
   for (const [target, state] of Object.entries(paneStatus.recommended_inspect_states)) {
     if (state) {
       console.log(`inspect_state_${target}: ${state}`);
@@ -560,10 +577,11 @@ function renderTeamPaneStatus(
     const panePart = item.pane_id ? ` pane=${item.pane_id}` : '';
     const cliPart = item.worker_cli ? ` cli=${item.worker_cli}` : '';
     const rolePart = item.role ? ` role=${item.role}` : '';
+    const alivePart = typeof item.alive === 'boolean' ? ` alive=${item.alive}` : '';
     const statePart = item.state ? ` state=${item.state}` : '';
     const taskPart = item.task_id ? ` task=${item.task_id}` : '';
     const subjectPart = item.task_subject ? ` subject=${item.task_subject}` : '';
-    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
+    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${alivePart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
   }
 
   for (const [target, command] of Object.entries(paneStatus.sparkshell_commands)) {
