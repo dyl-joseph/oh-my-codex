@@ -114,6 +114,15 @@ If an npm package is still published during the transition, treat it as a **laun
 Use this only when you are intentionally installing the temporary npm shim or working from source:
 
 ```bash
+omx setup
+omx doctor
+```
+
+If an npm package is still published during the transition, treat it as a **launcher/downloader shim only**. Normal CLI execution should come from the native `omx` binary, not `dist/cli/index.js`.
+
+### Current source / pre-cutover npm flow
+
+```bash
 npm install -g @openai/codex oh-my-codex
 omx setup
 omx doctor --team
@@ -230,7 +239,6 @@ omx agents-init .  # Bootstrap lightweight AGENTS.md files for a repo/subtree
 omx doctor         # Installation/runtime diagnostics
 omx doctor --team  # Team Mode diagnostics
 omx ask ...        # Ask local provider advisor (claude|gemini), writes .omx/artifacts/*
-omx explore ...    # Run the low-cost read-only exploration harness
 omx team ...       # Start/status/resume/shutdown team workers (interactive tmux by default)
 omx ralph          # Launch Codex with ralph persistence mode active
 omx status         # Show active modes
