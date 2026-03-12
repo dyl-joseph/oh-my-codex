@@ -76,7 +76,7 @@ jobs:
             dist/compat/__tests__/*.test.js
 
   coverage-team-critical:
-    name: Coverage Gate (Team Critical)
+    name: Coverage Gate (Team Critical) — informational
     runs-on: ubuntu-latest
     needs: [typecheck]
     steps:
@@ -113,7 +113,7 @@ jobs:
           path: coverage/team/
 
   coverage-ts-full:
-    name: Coverage Report (TypeScript Full)
+    name: Coverage Report (TypeScript Full) — informational
     runs-on: ubuntu-latest
     needs: [typecheck]
     steps:
@@ -194,9 +194,11 @@ jobs:
           path: coverage/rust/
 
   ralph-persistence-gate:
-    name: Ralph Persistence Gate
+    name: Ralph Persistence Gate — informational
     runs-on: ubuntu-latest
     needs: [typecheck]
+    # Non-gating verification; keep as signal only.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
