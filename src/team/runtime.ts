@@ -40,7 +40,6 @@ import {
   teamReadTask as readTask,
   teamListTasks as listTasks,
   teamReadManifest as readTeamManifestV2,
-  teamNormalizeGovernance as normalizeTeamGovernance,
   teamNormalizePolicy as normalizeTeamPolicy,
   teamClaimTask as claimTask,
   teamReleaseTaskClaim as releaseTaskClaim,
@@ -69,7 +68,6 @@ import {
   type TeamTask,
   type TeamMonitorSnapshotState,
   type TeamPhaseState,
-  type TeamGovernance,
   type TeamPolicy,
 } from './team-ops.js';
 import {
@@ -108,7 +106,6 @@ import { resolveCanonicalTeamStateRoot } from './state-root.js';
 import { inferPhaseTargetFromTaskCounts, reconcilePhaseStateForMonitor } from './phase-controller.js';
 import { getTeamTmuxSessions } from '../notifications/tmux.js';
 import { hasStructuredVerificationEvidence } from '../verification/verifier.js';
-import { buildRebalanceDecisions } from './rebalance-policy.js';
 import { readModeState, updateModeState } from '../modes/base.js';
 import {
   ensureWorktree,
@@ -182,50 +179,6 @@ async function syncRootTeamModeStateOnTerminalPhase(
     }
 
     await updateModeState('team', updates, cwd);
-  } catch {
-    // Best-effort compatibility sync only.
-  }
-}
-
-async function syncLinkedRalphModeStateOnTerminalPhase(
-  teamName: string,
-  phase: TeamPhase | TerminalPhase,
-  cwd: string,
-  nowIso: string = new Date().toISOString(),
-): Promise<void> {
-  if (phase !== 'complete' && phase !== 'failed' && phase !== 'cancelled') return;
-
-  try {
-    const [teamState, ralphState] = await Promise.all([
-      readModeState('team', cwd),
-      readModeState('ralph', cwd),
-    ]);
-    if (!teamState || !ralphState) return;
-
-    const stateTeamName = typeof teamState.team_name === 'string' ? teamState.team_name.trim() : '';
-    if (stateTeamName && stateTeamName !== teamName) return;
-    if (teamState.linked_ralph !== true || ralphState.linked_team !== true) return;
-
-    const terminalAt = typeof teamState.completed_at === 'string' && teamState.completed_at
-      ? teamState.completed_at
-      : nowIso;
-    const alreadySynced = ralphState.active === false
-      && ralphState.current_phase === phase
-      && ralphState.linked_team_terminal_phase === phase
-      && ralphState.linked_team_terminal_at === terminalAt
-      && ralphState.completed_at === terminalAt;
-    if (alreadySynced) return;
-
-    await updateModeState('ralph', {
-      active: false,
-      current_phase: phase,
-      linked_mode: 'team',
-      linked_team: true,
-      linked_team_terminal_phase: phase,
-      linked_team_terminal_at: terminalAt,
-      completed_at: terminalAt,
-      last_turn_at: nowIso,
-    }, cwd);
   } catch {
     // Best-effort compatibility sync only.
   }
@@ -720,8 +673,9 @@ export async function startTeam(
   cwd: string,
   options: TeamStartOptions = {},
 ): Promise<TeamRuntime> {
-  const leaderCwd = resolve(cwd);
-  await assertNestedTeamAllowed(leaderCwd);
+  if (process.env.OMX_TEAM_WORKER) {
+    throw new Error('nested_team_disallowed');
+  }
 
   const workerLaunchMode = resolveTeamWorkerLaunchMode(process.env);
   const displayMode = workerLaunchMode === 'interactive' ? 'split_pane' : 'auto';
@@ -734,6 +688,7 @@ export async function startTeam(
     }
   }
 
+  const leaderCwd = resolve(cwd);
   const sanitized = sanitizeTeamName(teamName);
   const teamStateRoot = resolveCanonicalTeamStateRoot(leaderCwd);
   const activeWorktreeMode: 'detached' | 'named' | null =
@@ -824,6 +779,7 @@ export async function startTeam(
     if (!config) {
       throw new Error('failed to initialize team config');
     }
+    sessionName = config.runtime_session_id;
     config.leader_cwd = leaderCwd;
     config.team_state_root = teamStateRoot;
     config.workspace_mode = workspaceMode;
@@ -951,6 +907,7 @@ export async function startTeam(
       sessionCreated = true;
       createdWorkerPaneIds.push(...createdSession.workerPaneIds);
       createdLeaderPaneId = createdSession.leaderPaneId;
+      config.runtime_session_id = sessionName;
       config.tmux_session = sessionName;
       config.leader_pane_id = createdSession.leaderPaneId;
       config.hud_pane_id = createdSession.hudPaneId;
@@ -960,7 +917,9 @@ export async function startTeam(
         workerPaneIds[i] = createdSession.workerPaneIds[i];
       }
     } else {
-      config.tmux_session = `prompt-${sanitized}`;
+      config.runtime_session_id = `prompt-${sanitized}`;
+      sessionName = config.runtime_session_id;
+      config.tmux_session = null;
       config.leader_pane_id = null;
       config.hud_pane_id = null;
       config.resize_hook_name = null;
@@ -1220,7 +1179,7 @@ export async function monitorTeam(teamName: string, cwd: string): Promise<TeamSn
   const dispatchPolicy = resolveDispatchPolicy(manifest?.policy, config.worker_launch_mode);
   const previousSnapshot = await readMonitorSnapshot(sanitized, cwd);
 
-  const sessionName = config.tmux_session;
+  const sessionName = config.tmux_session ?? config.runtime_session_id;
   const listTasksStartMs = performance.now();
   const allTasks = await listTasks(sanitized, cwd);
   const listTasksMs = performance.now() - listTasksStartMs;
@@ -1232,7 +1191,7 @@ export async function monitorTeam(teamName: string, cwd: string): Promise<TeamSn
     const reclaimed = await reclaimExpiredTaskClaim(sanitized, task.id, cwd);
     if (reclaimed.ok && reclaimed.reclaimed) reclaimedTaskIds.push(task.id);
   }
-  let taskView = reclaimedTaskIds.length > 0 ? await listTasks(sanitized, cwd) : allTasks;
+  const taskView = reclaimedTaskIds.length > 0 ? await listTasks(sanitized, cwd) : allTasks;
   const taskById = new Map(taskView.map((task) => [task.id, task] as const));
   const inProgressByOwner = new Map<string, TeamTask[]>();
   for (const task of taskView) {
@@ -1302,40 +1261,6 @@ export async function monitorTeam(teamName: string, cwd: string): Promise<TeamSn
     }
   }
 
-  for (const taskId of reclaimedTaskIds) {
-    recommendations.push(`Reclaimed expired claim for task-${taskId}`);
-  }
-  const rebalanceDecisions = buildRebalanceDecisions({
-    tasks: taskView,
-    workers: workers.map((worker) => ({
-      name: worker.name,
-      role: config.workers.find((entry) => entry.name === worker.name)?.role,
-      alive: worker.alive,
-      status: worker.status,
-    })),
-    reclaimedTaskIds,
-  });
-
-  let assignedDuringMonitor = false;
-  for (const decision of rebalanceDecisions) {
-    if (decision.type === 'assign' && decision.taskId && decision.workerName) {
-      try {
-        await assignTask(sanitized, decision.workerName, decision.taskId, cwd);
-        recommendations.push(`Assigned task-${decision.taskId} to ${decision.workerName}: ${decision.reason}`);
-        assignedDuringMonitor = true;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        recommendations.push(`Unable to assign task-${decision.taskId} to ${decision.workerName}: ${message}`);
-      }
-    } else {
-      recommendations.push(decision.reason);
-    }
-  }
-
-  if (assignedDuringMonitor) {
-    taskView = await listTasks(sanitized, cwd);
-  }
-
   // Count tasks
   const taskCounts = {
     total: taskView.length,
@@ -1374,8 +1299,10 @@ export async function monitorTeam(teamName: string, cwd: string): Promise<TeamSn
   await writeTeamPhaseState(sanitized, phaseState, cwd);
   const phase: TeamPhase | TerminalPhase = phaseState.current_phase;
   await syncRootTeamModeStateOnTerminalPhase(sanitized, phase, cwd);
-  await syncLinkedRalphModeStateOnTerminalPhase(sanitized, phase, cwd);
 
+  for (const taskId of reclaimedTaskIds) {
+    recommendations.push(`Reclaimed expired claim for task-${taskId}`);
+  }
   if (deadWorkerStall) {
     recommendations.push('All workers are dead while work remains; mark the team failed or restart with fresh workers.');
   }
@@ -1468,11 +1395,11 @@ export async function assignTask(
   const manifest = await readTeamManifestV2(sanitized, cwd);
   const governance = resolveGovernancePolicy(manifest?.governance);
 
-  if (governance.delegation_only && workerName === 'leader-fixed') {
+  if (manifest?.policy?.delegation_only && workerName === 'leader-fixed') {
     throw new Error('delegation_only_violation');
   }
 
-  if (governance.plan_approval_required && task.requires_code_change === true) {
+  if (manifest?.policy?.plan_approval_required && task.requires_code_change === true) {
     const approved = await isTaskApprovedForExecution(sanitized, taskId, cwd);
     if (!approved) {
       throw new Error('plan_approval_required');
@@ -1602,15 +1529,14 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
       failed: allTasks.filter((t) => t.status === 'failed').length,
       allowed: false,
     };
-    gate.allowed = governance.cleanup_requires_all_workers_inactive !== true
-      || (gate.pending === 0 && gate.blocked === 0 && gate.in_progress === 0 && gate.failed === 0);
+    gate.allowed = gate.pending === 0 && gate.blocked === 0 && gate.in_progress === 0 && gate.failed === 0;
 
     await appendTeamEvent(
       sanitized,
       {
         type: 'shutdown_gate',
         worker: 'leader-fixed',
-        reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed} cleanup_requires_all_workers_inactive=${governance.cleanup_requires_all_workers_inactive}${ralph ? ' policy=ralph' : ''}`,
+        reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? ' policy=ralph' : ''}`,
       },
       cwd,
     ).catch(() => {});
@@ -1645,7 +1571,8 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
     }, cwd).catch(() => {});
   }
 
-  const sessionName = config.tmux_session;
+  const sessionName = config.tmux_session ?? config.runtime_session_id;
+  const manifest = await readTeamManifestV2(sanitized, cwd);
   const dispatchPolicy = resolveDispatchPolicy(manifest?.policy, config.worker_launch_mode);
   const shutdownRequestTimes = new Map<string, string>();
 
@@ -1811,7 +1738,6 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
       },
       cwd,
     ).catch(() => {});
-    await syncLinkedRalphModeStateOnTerminalPhase(sanitized, 'cancelled', cwd);
   }
 
   const cleanupErrors: string[] = [];
@@ -1871,7 +1797,7 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
     }
   } else {
     // Check if tmux session still exists
-    const baseSession = config.tmux_session.split(':')[0];
+    const baseSession = (config.tmux_session ?? config.runtime_session_id).split(':')[0];
     const teamSessions = getTeamTmuxSessions(sanitized);
     if (!teamSessions.includes(baseSession)) return null;
   }
@@ -1879,7 +1805,7 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
   return {
     teamName: sanitized,
     sanitizedName: sanitized,
-    sessionName: config.tmux_session,
+    sessionName: config.runtime_session_id,
     config,
     cwd,
   };
@@ -1901,7 +1827,13 @@ async function findActiveTeams(cwd: string, leaderSessionId: string): Promise<st
     const workerLaunchMode = cfg?.worker_launch_mode
       ?? manifest?.policy?.worker_launch_mode
       ?? 'interactive';
-    const tmuxSession = (manifest?.tmux_session || cfg?.tmux_session || `omx-team-${teamName}`).split(':')[0];
+    const tmuxSession = (
+      manifest?.tmux_session
+      || cfg?.tmux_session
+      || manifest?.runtime_session_id
+      || cfg?.runtime_session_id
+      || `omx-team-${teamName}`
+    ).split(':')[0];
     if (leaderSessionId) {
       const ownerSessionId = manifest?.leader?.session_id?.trim() ?? '';
       if (ownerSessionId && ownerSessionId !== leaderSessionId) continue;
