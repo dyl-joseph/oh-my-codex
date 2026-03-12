@@ -18,6 +18,7 @@ pub const ASK_USAGE: &str = concat!(
 
 const ASK_ADVISOR_SCRIPT_ENV: &str = "OMX_ASK_ADVISOR_SCRIPT";
 const ASK_ORIGINAL_TASK_ENV: &str = "OMX_ASK_ORIGINAL_TASK";
+const ASK_PROVIDER_ENV: &str = "OMX_ASK_PROVIDER";
 const ASK_AGENT_PROMPT_FLAG: &str = "--agent-prompt";
 const SAFE_ROLE_PATTERN: &str = "abcdefghijklmnopqrstuvwxyz0123456789-";
 
@@ -406,15 +407,16 @@ fn run_advisor_override(
 
     let output = run_command_capture(
         command_path.as_os_str(),
-        &[parsed.provider.as_str(), final_prompt],
+        &[final_prompt],
         cwd,
         env,
-        &[(ASK_ORIGINAL_TASK_ENV, parsed.prompt.as_str())],
+        &[
+            (ASK_ORIGINAL_TASK_ENV, parsed.prompt.as_str()),
+            (ASK_PROVIDER_ENV, parsed.provider.as_str()),
+        ],
     )
     .map_err(|error| {
-        AskError::runtime(format!(
-            "[ask] failed to launch advisor script: {error}"
-        ))
+        AskError::runtime(format!("[ask] failed to launch advisor script: {error}"))
     })?;
 
     Ok(AskExecution {
@@ -464,13 +466,7 @@ fn ensure_provider_available(
     cwd: &Path,
     env: &BTreeMap<OsString, OsString>,
 ) -> Result<(), AskError> {
-    match run_command_capture(
-        OsStr::new(provider.as_str()),
-        &["--version"],
-        cwd,
-        env,
-        &[],
-    ) {
+    match run_command_capture(OsStr::new(provider.as_str()), &["--version"], cwd, env, &[]) {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Err(AskError::runtime(format!(
             "[ask-{}] Missing required local CLI binary: {}\n[ask-{}] Install/configure {} CLI, then verify with: {} --version",
@@ -594,7 +590,11 @@ fn build_artifact_body(
         iso_timestamp(),
         original_task,
         final_prompt,
-        if raw_output.is_empty() { "(no output)" } else { raw_output },
+        if raw_output.is_empty() {
+            "(no output)"
+        } else {
+            raw_output
+        },
         summary,
         action_items[0],
         action_items[1],

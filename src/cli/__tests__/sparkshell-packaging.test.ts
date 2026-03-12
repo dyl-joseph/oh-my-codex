@@ -1,22 +1,22 @@
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { arch, platform } from 'node:os';
-import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { arch, platform } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { withPackagedExploreHarnessLock } from "./packaged-explore-harness-lock.js";
 
 type PackageJson = {
-  bin?: string | Record<string, string>;
-  scripts?: Record<string, string>;
-  files?: string[];
+	bin?: string | Record<string, string>;
+	files?: string[];
 };
 
 type NpmPackDryRunFile = {
-  path: string;
+	path: string;
 };
 
 type NpmPackDryRunResult = {
-  files?: NpmPackDryRunFile[];
+	files?: NpmPackDryRunFile[];
 };
 
 describe('sparkshell packaging scaffold', () => {
@@ -34,29 +34,64 @@ describe('sparkshell packaging scaffold', () => {
     assert.equal(pkg.files?.includes('scripts/build-sparkshell.mjs'), true);
     assert.equal(pkg.files?.includes('scripts/test-sparkshell.mjs'), true);
 
-    const buildScriptPath = join(process.cwd(), 'scripts', 'build-sparkshell.mjs');
-    const testScriptPath = join(process.cwd(), 'scripts', 'test-sparkshell.mjs');
-    assert.equal(existsSync(buildScriptPath), true, 'expected build sparkshell helper script to exist');
-    assert.equal(existsSync(testScriptPath), true, 'expected test sparkshell helper script to exist');
+		const buildScriptPath = join(
+			process.cwd(),
+			"scripts",
+			"build-sparkshell.mjs",
+		);
+		const testScriptPath = join(
+			process.cwd(),
+			"scripts",
+			"test-sparkshell.mjs",
+		);
+		assert.equal(
+			existsSync(buildScriptPath),
+			true,
+			"expected build sparkshell helper script to exist",
+		);
+		assert.equal(
+			existsSync(testScriptPath),
+			true,
+			"expected test sparkshell helper script to exist",
+		);
 
-    try {
-      rmSync(packagedBinaryPath, { force: true });
-      const buildResult = spawnSync(process.execPath, [buildScriptPath], {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        env: { ...process.env, OMX_SPARKSHELL_MANIFEST: join(process.cwd(), 'native', 'omx-sparkshell', 'Cargo.toml') },
-      });
-      assert.equal(buildResult.status, 0, buildResult.stderr || buildResult.stdout);
-      assert.equal(existsSync(packagedBinaryPath), true, `expected staged binary at ${packagedBinaryRelativePath}`);
+		await withPackagedExploreHarnessLock(async () => {
+			try {
+				rmSync(packagedBinaryPath, { force: true });
+				const buildResult = spawnSync(process.execPath, [buildScriptPath], {
+					cwd: process.cwd(),
+					encoding: "utf-8",
+					env: {
+						...process.env,
+						OMX_SPARKSHELL_MANIFEST: join(
+							process.cwd(),
+							"native",
+							"omx-sparkshell",
+							"Cargo.toml",
+						),
+					},
+				});
+				assert.equal(
+					buildResult.status,
+					0,
+					buildResult.stderr || buildResult.stdout,
+				);
+				assert.equal(
+					existsSync(packagedBinaryPath),
+					true,
+					`expected staged binary at ${packagedBinaryRelativePath}`,
+				);
 
-      const packed = spawnSync('npm', ['pack', '--dry-run', '--json'], {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-      });
-      assert.equal(packed.status, 0, packed.stderr || packed.stdout);
+				const packed = spawnSync("npm", ["pack", "--dry-run", "--json"], {
+					cwd: process.cwd(),
+					encoding: "utf-8",
+				});
+				assert.equal(packed.status, 0, packed.stderr || packed.stdout);
 
-      const results = JSON.parse(packed.stdout) as NpmPackDryRunResult[];
-      const packedFiles = new Set((results[0]?.files ?? []).map((file) => file.path));
+				const results = JSON.parse(packed.stdout) as NpmPackDryRunResult[];
+				const packedFiles = new Set(
+					(results[0]?.files ?? []).map((file) => file.path),
+				);
 
       assert.equal(packedFiles.has('scripts/build-sparkshell.mjs'), true);
       assert.equal(packedFiles.has('scripts/test-sparkshell.mjs'), true);

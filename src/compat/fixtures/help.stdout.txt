@@ -2,7 +2,7 @@
 oh-my-codex (omx) - Multi-agent orchestration for Codex CLI
 
 Usage:
-  omx           Launch Codex CLI (HUD auto-attaches only when already inside tmux)
+  omx           Launch the native OMX/Codex path (HUD auto-attaches only when already inside tmux)
   omx setup     Install skills, prompts, MCP servers, and AGENTS.md
   omx uninstall Remove OMX configuration and clean up installed artifacts
   omx doctor    Check installation health
@@ -14,11 +14,12 @@ Usage:
                 Bootstrap lightweight AGENTS.md files for a repo/subtree
   omx deepinit [path]
                 Alias for agents-init (lightweight AGENTS bootstrap only)
-  omx team      Start prompt-mode team workers and bootstrap inbox/task state
+  omx team      Start prompt-mode team workers (default path; no tmux required)
+                and bootstrap inbox/task state
   omx ralph     Launch Codex with ralph persistence mode active
   omx version   Show version information
-  omx tmux-hook Manage tmux prompt injection workaround (init|status|validate|test)
-  omx hooks     Manage hook plugins (init|status|validate|test)
+  omx tmux-hook Manage optional tmux compatibility workflow (init|status|validate|test)
+  omx hooks     Manage optional hook plugin workflow (init|status|validate|test)
   omx hud       Show HUD statusline (--watch, --json, --preset=NAME)
   omx help      Show this help message
   omx status    Show active modes and state

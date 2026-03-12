@@ -1352,11 +1352,11 @@ export async function assignTask(
   if (!task) throw new Error(`Task ${taskId} not found`);
   const manifest = await readTeamManifestV2(sanitized, cwd);
 
-  if (manifest?.policy?.delegation_only && workerName === 'leader-fixed') {
+  if (manifest?.governance?.delegation_only && workerName === 'leader-fixed') {
     throw new Error('delegation_only_violation');
   }
 
-  if (manifest?.policy?.plan_approval_required && task.requires_code_change === true) {
+  if (manifest?.governance?.plan_approval_required && task.requires_code_change === true) {
     const approved = await isTaskApprovedForExecution(sanitized, taskId, cwd);
     if (!approved) {
       throw new Error('plan_approval_required');
@@ -1777,7 +1777,7 @@ async function findActiveTeams(cwd: string, leaderSessionId: string): Promise<st
     const teamName = e.name;
     const cfg = await readTeamConfig(teamName, cwd);
     const manifest = await readTeamManifestV2(teamName, cwd);
-    if (manifest?.policy?.one_team_per_leader_session === false) continue;
+    if (manifest?.governance?.one_team_per_leader_session === false) continue;
     const workerLaunchMode = cfg?.worker_launch_mode
       ?? manifest?.policy?.worker_launch_mode
       ?? 'interactive';

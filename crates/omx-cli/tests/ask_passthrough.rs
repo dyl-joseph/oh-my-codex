@@ -109,8 +109,8 @@ fn injects_original_task_env_without_rewriting_prompt() {
         &script_path,
         concat!(
             "#!/usr/bin/env node\n",
-            "const prompt = process.argv.slice(2).join(' ');\n",
-            "process.stdout.write(`prompt=${prompt}\\n`);\n",
+            "const args = process.argv.slice(1).filter((value) => value !== __filename);\n",
+            "process.stdout.write(`${JSON.stringify(args)}\\n`);\n",
             "process.stderr.write(`original=${process.env.OMX_ASK_ORIGINAL_TASK || ''}\\n`);\n",
             "process.exit(5);\n",
         ),
@@ -136,13 +136,35 @@ fn injects_original_task_env_without_rewriting_prompt() {
 
     assert_eq!(
         String::from_utf8(result.stdout).expect("utf8 stdout"),
-        "prompt=ship feature\n"
+        "[\"ship feature\"]\n"
     );
     assert_eq!(
         String::from_utf8(result.stderr).expect("utf8 stderr"),
         "original=ship feature\n"
     );
     assert_eq!(result.exit_code, 5);
+}
+
+#[test]
+fn advisor_override_receives_provider_via_env_and_prompt_verbatim() {
+    let cwd = temp_dir("advisor-provider-env");
+    let env = env_map(&[(
+        "OMX_ASK_ADVISOR_SCRIPT",
+        "scripts/fixtures/ask-advisor-stub.js",
+    )]);
+    let result = run_ask(
+        &["gemini".to_owned(), "ship".to_owned(), "feature".to_owned()],
+        &cwd,
+        &env,
+    )
+    .expect("run ask against advisor stub");
+
+    assert_eq!(
+        String::from_utf8(result.stdout).expect("utf8 stdout"),
+        "OUT:gemini:ship feature\n"
+    );
+    assert!(result.stderr.is_empty());
+    assert_eq!(result.exit_code, 0);
 }
 
 #[test]
@@ -158,7 +180,9 @@ fn native_default_writes_artifact_without_needing_node() {
     .expect("write provider");
     #[cfg(unix)]
     {
-        let mut permissions = fs::metadata(&provider_path).expect("metadata").permissions();
+        let mut permissions = fs::metadata(&provider_path)
+            .expect("metadata")
+            .permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&provider_path, permissions).expect("chmod");
     }

@@ -180,7 +180,7 @@ fn run_install_doctor(
     Ok(DoctorExecution {
         stdout: output.into_bytes(),
         stderr: Vec::new(),
-        exit_code: i32::from(fail_count > 0),
+        exit_code: 0,
     })
 }
 
@@ -382,6 +382,20 @@ fn check_config(config_path: &Path) -> Result<Check, DoctorError> {
 
     let content = fs::read_to_string(config_path)
         .map_err(|_| DoctorError::runtime("cannot read config.toml"))?;
+    if let Some(error) = validate_toml(&content) {
+        let hint = if error.contains("duplicate") || error.contains("[tui]") {
+            "possible duplicate TOML table such as [tui]"
+        } else {
+            "invalid TOML syntax"
+        };
+
+        return Ok(Check {
+            name: "Config",
+            status: CheckStatus::Fail,
+            message: format!("invalid config.toml ({hint})"),
+        });
+    }
+
     if content.contains("omx_") || content.contains("oh-my-codex") {
         return Ok(Check {
             name: "Config",
@@ -395,6 +409,37 @@ fn check_config(config_path: &Path) -> Result<Check, DoctorError> {
         status: CheckStatus::Warn,
         message: "config.toml exists but no OMX entries yet (expected before first setup; run \"omx setup --force\" once)".to_string(),
     })
+}
+
+fn validate_toml(content: &str) -> Option<String> {
+    let mut seen_tables = BTreeSet::new();
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if line.starts_with("[[") && line.ends_with("]]") {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            let table_name = line
+                .strip_prefix('[')
+                .and_then(|value| value.strip_suffix(']'))
+                .map(str::trim)
+                .unwrap_or_default();
+            if table_name.is_empty() {
+                return Some("invalid TOML syntax".to_string());
+            }
+            if !seen_tables.insert(table_name.to_string()) {
+                return Some(format!("duplicate TOML table [{table_name}]"));
+            }
+        }
+    }
+
+    None
 }
 
 fn check_prompts(dir: &Path, prompt_min: usize) -> Result<Check, DoctorError> {
@@ -1116,9 +1161,21 @@ mod tests {
     #[test]
     fn install_doctor_only_warns_when_node_is_missing() {
         let wd = temp_dir("install-no-node");
-        let execution = run_doctor(&[], &wd, &env_map(&[("PATH", "")])).expect("run doctor");
+        let fake_bin = wd.join("bin");
+        fs::create_dir_all(&fake_bin).expect("create fake bin");
+        let codex_path = fake_bin.join("codex");
+        fs::write(&codex_path, "#!/bin/sh\necho codex-test-version\n").expect("write codex stub");
+        make_executable(&codex_path);
+
+        let execution = run_doctor(
+            &[],
+            &wd,
+            &env_map(&[("PATH", fake_bin.to_string_lossy().as_ref())]),
+        )
+        .expect("run doctor");
         let stdout = String::from_utf8(execution.stdout).expect("utf8 stdout");
         assert_eq!(execution.exit_code, 0);
+        assert!(stdout.contains("[OK] Codex CLI: installed (codex-test-version)"));
         assert!(stdout.contains(
             "[!!] Node.js: not found (optional; only needed for transitional JS flows)"
         ));

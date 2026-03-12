@@ -316,6 +316,20 @@ describe('resolveCliInvocation', () => {
     });
   });
 
+  it('resolves resume to resume command and preserves passthrough args', () => {
+    assert.deepEqual(resolveCliInvocation(['resume', '--last']), {
+      command: 'resume',
+      launchArgs: ['--last'],
+    });
+  });
+
+  it('resolves sparkshell to sparkshell command', () => {
+    assert.deepEqual(resolveCliInvocation(['sparkshell', 'git', 'status']), {
+      command: 'sparkshell',
+      launchArgs: [],
+    });
+  });
+
   it('resolves agents-init to agents-init command', () => {
     assert.deepEqual(resolveCliInvocation(['agents-init', '.']), {
       command: 'agents-init',

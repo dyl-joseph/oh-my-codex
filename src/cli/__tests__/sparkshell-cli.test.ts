@@ -24,8 +24,9 @@ function runOmx(
 ): { status: number | null; stdout: string; stderr: string; error?: string } {
   const testDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = join(testDir, '..', '..', '..');
-  const omxBin = join(repoRoot, 'bin', 'omx.js');
-  const result = spawnSync('node', [omxBin, ...argv], {
+  const omxEntry = join(repoRoot, 'dist', 'cli', 'index.js');
+  const runner = `import(${JSON.stringify(omxEntry)}).then(async ({ main }) => { await main(process.argv.slice(1)); }).catch((error) => { console.error(error); process.exit(1); });`;
+  const result = spawnSync(process.execPath, ['-e', runner, '--', ...argv], {
     cwd,
     encoding: 'utf-8',
     env: { ...process.env, ...envOverrides },
@@ -279,7 +280,7 @@ describe('omx sparkshell', () => {
       if (shouldSkipForSpawnPermissions(result.error)) return;
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
-      assert.match(result.stdout, /omx explore\s+Default read-only exploration entrypoint \(may adaptively use sparkshell backend\)/);
+      assert.match(result.stdout, /omx explore\s+Run the low-cost read-only exploration harness/);
       assert.match(result.stdout, /omx sparkshell <command> \[args\.\.\.\]/);
       assert.match(result.stdout, /omx sparkshell --tmux-pane <pane-id> \[--tail-lines <100-1000>\]/);
       assert.match(result.stdout, /adaptive backend for qualifying read-only explore tasks/i);

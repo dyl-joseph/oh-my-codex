@@ -48,6 +48,9 @@ const TEAM_HELP: &str = concat!(
     "       omx team api <operation> [--input <json>] [--json]\n",
     "       omx team api --help\n",
     "\n",
+    "Default path: native prompt-mode workers with state-backed coordination.\n",
+    "tmux is optional for explicit compatibility/integration workflows only.\n",
+    "\n",
     "Examples:\n",
     "  omx team 3:executor \"fix failing tests\"\n",
     "  omx team status my-team\n",
@@ -440,7 +443,10 @@ fn spawn_prompt_worker_process(
             .join("workers")
             .join(worker_name)
             .join("status.json"),
-        "{\n  \"state\": \"idle\",\n  \"updated_at\": \"bootstrap\"\n}\n",
+        &format!(
+            "{{\n  \"state\": \"idle\",\n  \"updated_at\": \"{}\"\n}}\n",
+            iso_timestamp()
+        ),
     )?;
     Ok(SpawnedPromptWorker { pid, worker_cli })
 }
@@ -4298,6 +4304,16 @@ mod tests {
         dir
     }
 
+    fn assert_isoish_timestamp(value: &str) {
+        let (seconds, millis_and_suffix) = value.split_once('.').expect("timestamp dot");
+        assert!(!seconds.is_empty());
+        assert!(seconds.chars().all(|ch| ch.is_ascii_digit()));
+        assert!(millis_and_suffix.ends_with('Z'));
+        let millis = &millis_and_suffix[..millis_and_suffix.len() - 1];
+        assert_eq!(millis.len(), 3);
+        assert!(millis.chars().all(|ch| ch.is_ascii_digit()));
+    }
+
     #[test]
     fn prints_team_help_for_help_variants() {
         for args in [vec![], vec!["--help".to_string()], vec!["help".to_string()]] {
@@ -4587,6 +4603,14 @@ mod tests {
         assert!(config.contains("\"worker_launch_mode\": \"prompt\""));
         assert!(config.contains("\"runtime_session_id\": \"prompt-bootstrap-native-team\""));
         assert!(config.contains("\"tmux_session\": null"));
+
+        let worker_status = fs::read_to_string(
+            cwd.join(".omx/state/team/bootstrap-native-team/workers/worker-1/status.json"),
+        )
+        .expect("read worker status");
+        assert!(worker_status.contains("\"state\": \"idle\""));
+        let updated_at = extract_json_value(&worker_status, "updated_at").expect("updated_at");
+        assert_isoish_timestamp(updated_at.trim_matches('"'));
 
         let manifest =
             fs::read_to_string(cwd.join(".omx/state/team/bootstrap-native-team/manifest.v2.json"))

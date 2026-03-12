@@ -5,16 +5,16 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 type PackageJson = {
-  bin?: string | Record<string, string>;
+	bin?: string | Record<string, string>;
 };
 
 type NpmPackDryRunFile = {
-  path: string;
-  mode?: number;
+	path: string;
+	mode?: number;
 };
 
 type NpmPackDryRunResult = {
-  files?: NpmPackDryRunFile[];
+	files?: NpmPackDryRunFile[];
 };
 
 describe('package bin contract', () => {
@@ -34,14 +34,14 @@ describe('package bin contract', () => {
     assert.ok(pkg.files?.includes('Cargo.lock'));
     assert.ok(pkg.files?.includes('crates/'));
 
-    const binPath = join(process.cwd(), 'bin', 'omx');
-    assert.equal(existsSync(binPath), true, 'expected bin/omx to exist');
+		const binPath = join(process.cwd(), "bin", "omx");
+		assert.equal(existsSync(binPath), true, "expected bin/omx to exist");
 
-    const binSource = readFileSync(binPath, 'utf-8');
-    assert.match(binSource, /^#!\/bin\/sh/);
+		const binSource = readFileSync(binPath, "utf-8");
+		assert.match(binSource, /^#!\/bin\/sh/);
 
-    const stat = statSync(binPath);
-    assert.notEqual(stat.mode & 0o111, 0, 'expected bin/omx to be executable');
+		const stat = statSync(binPath);
+		assert.notEqual(stat.mode & 0o111, 0, "expected bin/omx to be executable");
 
     const packed = spawnSync('npm', ['pack', '--dry-run', '--json'], {
       cwd: process.cwd(),

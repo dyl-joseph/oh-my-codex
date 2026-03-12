@@ -12,7 +12,7 @@
 
 > **[Website](https://yeachan-heo.github.io/oh-my-codex-website/)** | **[Documentation](https://yeachan-heo.github.io/oh-my-codex-website/docs.html)** | **[CLI Reference](https://yeachan-heo.github.io/oh-my-codex-website/docs.html#cli-reference)** | **[Workflows](https://yeachan-heo.github.io/oh-my-codex-website/docs.html#workflows)** | **[OpenClaw Integration Guide](./docs/openclaw-integration.md)** | **[GitHub](https://github.com/Yeachan-Heo/oh-my-codex)** | **[npm](https://www.npmjs.com/package/oh-my-codex)**
 
-Operational runtime for [OpenAI Codex CLI](https://github.com/openai/codex).
+Multi-agent orchestration layer for [OpenAI Codex CLI](https://github.com/openai/codex).
 
 ## Featured Guides
 
@@ -38,41 +38,35 @@ Operational runtime for [OpenAI Codex CLI](https://github.com/openai/codex).
 OMX turns Codex from a single-session agent into a coordinated system with:
 - Role prompts (`/prompts:name`) for specialized agents
 - Workflow skills (`$name`) for repeatable execution modes
-- Team orchestration (`omx team`, `$team`) with prompt-mode workers as the normal path and tmux-backed flows where explicitly needed
+- Team orchestration (`omx team`, `$team`) with prompt-mode workers as the default path and tmux-backed flows reserved for explicit compatibility workflows
 - Persistent state + memory via MCP servers
 
 ## Why OMX
 
-Codex CLI is unusually well suited to persistent orchestration: it is lightweight enough to stay alive across long sessions, tmux lanes, and repeated handoffs without burying coordination under a heavy shell stack.
+Codex CLI is strong for direct tasks. OMX adds structure for larger work:
+- Decomposition and staged execution (`team-plan -> team-prd -> team-exec -> team-verify -> team-fix`)
+- Persistent mode lifecycle state (`.omx/state/`)
+- Memory + notepad surfaces for long-running sessions
+- Operational controls for launch, verification, and cancellation
 
-That matters because orchestration is not just fanout. It needs durable state, shared situational awareness, visible recovery paths, and tight operator control. Heavier shell-centric wrappers can be fine for one-shot launches, but they are a poor fit for always-on coordination where every extra layer adds latency, noise, and failure surface.
+OMX is an add-on, not a fork. It uses Codex-native extension points.
 
-OMX keeps Codex as the execution engine and adds the runtime around it.
+## Positioning: CLI-first orchestration, MCP-backed state
 
 OMX is best used as an **outer CLI orchestration layer**:
-- **Control plane (CLI/runtime):** `omx team`, prompt/tmux worker orchestration, lifecycle commands
+- **Control plane (CLI/runtime):** native `omx`, prompt-mode team orchestration, lifecycle commands
 - **Capability/state plane (MCP):** task state, mailbox, memory, diagnostics tools
 
-OMX is a small operational runtime layered around Codex:
-- **Execution plane:** Codex runs the actual agent work
-- **Control plane:** `omx` manages team workers, lifecycle commands, HUD/tmux integration, and recovery
-- **State plane:** MCP servers back state, mailbox, memory, diagnostics, and project context
+Practical mode split:
+- **`$team` / `omx team`**: durable, inspectable, resumable multi-worker execution with live lanes, shared blockers, and visible handoff / rebalancing when one worker gets stuck
+- **`$ultrawork`**: lightweight parallel fanout for independent tasks (component mode)
 
 Why team mode exists even when ultrawork already exists:
 - Use **ultrawork** when tasks are mostly independent and the leader can merge results afterward.
-- Use **team mode** when the work benefits from shared situational awareness: workers can discover blockers early, hand work across lanes, and keep execution visible through durable state, with tmux available only when a live pane workflow is actually needed.
+- Use **team mode** when the work benefits from shared situational awareness: workers can discover blockers early, hand work across lanes, and keep execution visible through durable state, with tmux available only when an explicit live-pane compatibility workflow is actually needed.
 - Team mode is the better fit for orchestration-heavy or edge-case-heavy work where runtime control, recovery, and inspectability matter as much as raw fanout.
 
-## Team Mode vs. Ultrawork
-
-If you are deciding between the two, start with **Team Mode**.
-
-- **`$team` / `omx team`** — default for substantial work. Use it when tasks share context, blockers matter, handoffs are likely, or you want durable runtime control.
-- **`$ultrawork`** — use it for lightweight parallel fanout when subtasks are mostly independent and the leader can merge results afterward.
-
-In short: **Ultrawork is parallelism. Team Mode is orchestration.**
-
-Low-token Team Mode profile example:
+Low-token team profile example:
 
 ```bash
 OMX_TEAM_WORKER_CLI=codex \
@@ -120,19 +114,9 @@ If an npm package is still published during the transition, treat it as a **laun
 Use this only when you are intentionally installing the temporary npm shim or working from source:
 
 ```bash
+npm install -g oh-my-codex
 omx setup
 omx doctor
-```
-
-If an npm package is still published during the transition, treat it as a **launcher/downloader shim only**. Normal CLI execution should come from the native `omx` binary, not `dist/cli/index.js`.
-
-### Current source / pre-cutover npm flow
-
-```bash
-npm install -g @openai/codex oh-my-codex
-omx setup
-omx doctor --team
-omx team 3:executor "ship the scoped task with verification"
 ```
 
 Recommended trusted-environment launch profile:
@@ -153,10 +137,10 @@ omx --xhigh --madmax
 Inside Codex:
 
 ```text
+/prompts:architect "analyze current auth boundaries"
+/prompts:executor "implement input validation in login"
 $plan "ship OAuth callback safely"
-$team 3:executor "implement safely with shared verification"
-/prompts:architect "review the boundary decisions"
-/prompts:executor "take the next scoped task"
+$team 3:executor "fix all TypeScript errors"
 ```
 
 From terminal:
@@ -166,7 +150,6 @@ omx team 4:executor "parallelize a multi-module refactor"
 omx team status <team-name>
 omx team status <team-name> --json
 omx team status <team-name> --tail-lines 600
-omx team resume <team-name>
 omx team shutdown <team-name>
 ```
 
@@ -175,9 +158,8 @@ omx team shutdown <team-name>
 OMX installs and wires these layers:
 
 ```text
-User / Operator
-  -> OMX runtime
-    -> Codex CLI (execution engine)
+User
+  -> Codex CLI
     -> AGENTS.md (orchestration brain)
     -> ~/.codex/prompts/*.md (installable active/internal agent prompt catalog)
     -> ~/.agents/skills/*/SKILL.md (skill catalog)
@@ -203,13 +185,11 @@ This is designed to make OMX's initial routing behavior more Sisyphus-like witho
 
 ### How to test this experiment
 
-1. Build the project (TypeScript + native Rust helpers):
+1. Build the project:
 
 ```bash
-npm run build:full
+npm run build
 ```
-
-If you only need the TypeScript output, `npm run build` still runs just `tsc`.
 
 2. Reinstall native agent configs:
 
@@ -238,20 +218,19 @@ This experiment currently changes native prompt generation and metadata, not the
 ## Main Commands
 
 ```bash
-omx                # Launch Codex inside the OMX runtime (+ HUD in tmux when available)
-omx team ...       # Start/status/resume/shutdown coordinated team workers (default orchestration surface)
+omx                # Launch the native CLI path; no tmux required
 omx setup          # Install prompts/skills/config by scope + project .omx (AGENTS.md only for project scope)
 omx agents-init .  # Bootstrap lightweight AGENTS.md files for a repo/subtree
 omx doctor         # Installation/runtime diagnostics
-omx doctor --team  # Team Mode diagnostics
+omx doctor --team  # Team/swarm diagnostics
 omx ask ...        # Ask local provider advisor (claude|gemini), writes .omx/artifacts/*
-omx team ...       # Start/status/resume/shutdown team workers (prompt-mode by default; no tmux required)
+omx team ...       # Start/status/resume/shutdown prompt-mode team workers (default path; no tmux required)
 omx ralph          # Launch Codex with ralph persistence mode active
 omx status         # Show active modes
 omx cancel         # Cancel active execution modes
 omx reasoning <mode> # low|medium|high|xhigh
-omx tmux-hook ...  # init|status|validate|test
-omx hooks ...      # init|status|validate|test (plugin extension workflow)
+omx tmux-hook ...  # init|status|validate|test (optional tmux compatibility workflow)
+omx hooks ...      # init|status|validate|test (optional plugin extension workflow)
 omx hud ...        # --watch|--json|--preset
 omx version        # Show version information
 omx help           # Show help message
@@ -312,7 +291,7 @@ omx team 2:executor "task"
 
 OMX now includes `omx hooks` for plugin scaffolding and validation.
 
-- `omx tmux-hook` remains supported and unchanged.
+- `omx tmux-hook` remains available as an optional tmux compatibility surface.
 - `omx hooks` is additive and does not replace tmux-hook workflows.
 - Plugin files live at `.omx/hooks/*.mjs`.
 - Plugins are off by default; enable with `OMX_HOOK_PLUGINS=1`.
@@ -321,9 +300,7 @@ See `docs/hooks-extension.md` for the full extension workflow and event model.
 
 ## Sparkshell (preview)
 
-`omx sparkshell <command> [args...]` runs through a JS -> Rust sidecar bridge for fast command execution with adaptive summaries when output exceeds `OMX_SPARKSHELL_LINES`. `omx explore` now treats it as a backend for qualifying read-only shell-native tasks; `omx sparkshell` remains the explicit specialist surface for direct operator use.
-
-It remains an explicit operator-facing command, but OMX may also use it as a backend for qualifying `omx explore` read-only shell-native tasks. That backend relationship does not relax read-only safety: non-read-only or unsupported shell execution should still stay blocked or on the normal path.
+`omx sparkshell <command> [args...]` runs through a JS -> Rust sidecar bridge for fast command execution with adaptive summaries when output exceeds `OMX_SPARKSHELL_LINES`.
 
 Current preview contract:
 - Short output stays raw; long output is summarized into markdown sections limited to `summary:`, `failures:`, and `warnings:`.
@@ -345,8 +322,6 @@ Preview build helpers:
 npm run build:sparkshell
 npm run test:sparkshell
 ```
-
-For a full local source build in one command, use `npm run build:full`.
 
 ## Launch Flags
 
@@ -451,19 +426,15 @@ omx team 3:executor "execute the approved ralplan with shared runtime coordinati
 
 Planned documentation/product direction: make `ralplan` produce stronger team follow-up guidance by default, including worker placement hints and an explicit follow-up path such as `--followup team`.
 
-### Why `omx team ralph` is a linked launch path
+### Why `omx team ralph` is a distinct launch mode
 
 Use `omx team ralph ...` when the team run and Ralph follow-up should behave as
 one linked lifecycle, not as two unrelated commands.
 
-It does **not** spin up a separate team runtime. OMX uses the normal
-`omx team` startup path, then seeds linked team/Ralph state from launch time so
-later status, shutdown, and cancel flows can observe one connected run.
-
-- **Linked lifecycle/state:** launch records `linked_ralph=true` in team state,
-  creates/updates Ralph state with `linked_team=true`, and later terminal team
-  phases propagate into Ralph state. That gives one operator-visible chain for
-  resume/cancel/final verification instead of a manual handoff after the fact.
+- **Linked lifecycle/state:** team starts with `linked_ralph=true`, Ralph tracks
+  `linked_team=true`, and terminal team phases propagate into Ralph state. That
+  gives one operator-visible chain for resume/cancel/final verification instead
+  of a manual handoff after the fact.
 - **Cleanup/shutdown:** linked shutdown uses the Ralph-aware cleanup policy.
   Team cleanup happens first, Ralph is terminalized from the linked team result,
   branch rollback preserves worktree branches, and the run records linked
@@ -534,8 +505,6 @@ Notes:
   - `model_context_window = 1000000` and `model_auto_compact_token_limit = 900000` only when the effective root model is `gpt-5.4` and both context keys are absent
   - `[features] multi_agent = true, child_agents_md = true`
   - MCP server entries (`omx_state`, `omx_memory`, `omx_code_intel`, `omx_trace`)
-  - If a shared MCP registry exists at `~/.omx/mcp-registry.json` (fallback: `~/.omc/mcp-registry.json`), setup syncs those entries into a dedicated managed block in `config.toml` (skipping names already defined elsewhere to avoid duplicate TOML tables)
-  - User-scoped setup also syncs missing shared MCP entries into `~/.claude/settings.json` without overwriting existing Claude Code MCP server definitions
   - `[tui] status_line`
 - Project `AGENTS.md` (project scope only)
 - `.omx/` runtime directories and HUD config
@@ -642,7 +611,7 @@ git clone https://github.com/Yeachan-Heo/oh-my-codex.git
 cd oh-my-codex
 npm install
 npm run lint
-npm run build:full
+npm run build
 npm test
 ```
 

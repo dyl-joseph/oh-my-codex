@@ -531,15 +531,27 @@ function checkDirectory(name: string, path: string): Check {
 }
 
 function validateToml(content: string): string | null {
-  try {
-    parseToml(content);
-    return null;
-  } catch (error) {
-    if (error instanceof Error) {
-      return error.message;
+  const seenTables = new Set<string>();
+
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+
+    const arrayTableMatch = line.match(/^\[\[(.+)\]\]$/u);
+    if (arrayTableMatch) continue;
+
+    const tableMatch = line.match(/^\[(.+)\]$/u);
+    if (tableMatch) {
+      const tableName = tableMatch[1]?.trim();
+      if (!tableName) return 'invalid TOML syntax';
+      if (seenTables.has(tableName)) {
+        return `duplicate TOML table [${tableName}]`;
+      }
+      seenTables.add(tableName);
     }
-    return 'unknown TOML parse error';
   }
+
+  return null;
 }
 
 async function checkConfig(configPath: string): Promise<Check> {
@@ -550,6 +562,7 @@ async function checkConfig(configPath: string): Promise<Check> {
   try {
     const content = await readFile(configPath, 'utf-8');
     const tomlError = validateToml(content);
+    const hasOmx = content.includes('omx_') || content.includes('oh-my-codex');
 
     if (tomlError) {
       const hint =
@@ -566,7 +579,6 @@ async function checkConfig(configPath: string): Promise<Check> {
       };
     }
 
-    const hasOmx = content.includes('omx_') || content.includes('oh-my-codex');
     if (hasOmx) {
       return { name: 'Config', status: 'pass', message: 'config.toml has OMX entries' };
     }

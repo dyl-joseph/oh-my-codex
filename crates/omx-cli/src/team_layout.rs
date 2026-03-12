@@ -272,7 +272,10 @@ pub fn deactivate_team_mode_state(
     )
 }
 
-pub fn find_active_prompt_team_root(cwd: &Path, state_root: &Path) -> io::Result<Option<PathBuf>> {
+pub fn find_active_prompt_team_root(
+    _cwd: &Path,
+    state_root: &Path,
+) -> io::Result<Option<PathBuf>> {
     let Some(team_state_raw) = read_optional(state_root.join("team-state.json"))? else {
         return Ok(None);
     };
@@ -282,7 +285,7 @@ pub fn find_active_prompt_team_root(cwd: &Path, state_root: &Path) -> io::Result
     let Some(team_name) = extract_json_string_field(&team_state_raw, "team_name") else {
         return Ok(None);
     };
-    let team_root = cwd.join(".omx").join("state").join("team").join(team_name);
+    let team_root = state_root.join("team").join(team_name);
     if team_root.exists() {
         Ok(Some(team_root))
     } else {
@@ -477,7 +480,7 @@ fn escape_json_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HudModeOverride, sync_prompt_layout_from_state};
+    use super::{HudModeOverride, find_active_prompt_team_root, sync_prompt_layout_from_state};
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::fs;
@@ -534,5 +537,25 @@ mod tests {
             fs::read_to_string(state_root.join("team-state.json")).expect("team-state");
         assert!(team_state.contains("\"layout_mode\": \"native_equivalent\""));
         assert!(team_state.contains("\"hud_mode\": \"inline\""));
+    }
+
+    #[test]
+    fn finds_active_prompt_team_root_from_state_root_instead_of_cwd() {
+        let cwd = temp_dir("lookup-cwd");
+        let state_host = temp_dir("lookup-state");
+        let state_root = state_host.join(".omx/state");
+        let team_root = state_root.join("team/prompty");
+        fs::create_dir_all(&team_root).expect("team root");
+        fs::write(
+            state_root.join("team-state.json"),
+            r#"{"active":true,"team_name":"prompty"}"#,
+        )
+        .expect("team state");
+
+        let resolved = find_active_prompt_team_root(&cwd, &state_root)
+            .expect("find active prompt team root")
+            .expect("team root");
+
+        assert_eq!(resolved, team_root);
     }
 }
