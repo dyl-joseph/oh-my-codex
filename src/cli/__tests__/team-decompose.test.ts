@@ -34,6 +34,13 @@ describe('decomposeTaskString', () => {
     assert.match(tasks[2].subject, /review|document/i);
   });
 
+  it('round-robins generated aspect subtasks when explicit same-role fanout is requested', () => {
+    const tasks = decomposeTaskString('implement user login', 3, 'executor', true, true);
+    assert.equal(tasks.length, 3);
+    assert.deepEqual(tasks.map((task) => task.owner), ['worker-1', 'worker-2', 'worker-3']);
+    assert.deepEqual(new Set(tasks.map((task) => task.role)), new Set(['executor']));
+  });
+
   it('assigns all workers the explicit agentType when explicitAgentType=true', () => {
     const tasks = decomposeTaskString('fix tests, build UI, and write docs', 3, 'executor', true);
     assert.equal(tasks.length, 3);

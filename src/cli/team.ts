@@ -418,6 +418,7 @@ export function buildTeamExecutionPlan(
   const fallbackRole = resolveImplicitTeamFallbackRole(agentType, explicitAgentType);
 
   let subtasks = plan.subtasks;
+  const usedAspectSubtasks = subtasks.length <= 1 && effectiveWorkerCount > 1;
   if (subtasks.length <= 1 && effectiveWorkerCount > 1) {
     subtasks = createAspectSubtasks(task, effectiveWorkerCount);
   }
@@ -430,9 +431,17 @@ export function buildTeamExecutionPlan(
     return { ...st, role: result.role };
   });
 
+  const normalizedRoles = new Set(tasksWithRoles.map((task) => (task.role ?? '').trim()));
+  const tasks = usedAspectSubtasks && tasksWithRoles.length > 1 && normalizedRoles.size <= 1
+    ? tasksWithRoles.map((task, index) => ({
+      ...task,
+      owner: `worker-${(index % effectiveWorkerCount) + 1}`,
+    }))
+    : distributeTasksToWorkers(tasksWithRoles, effectiveWorkerCount);
+
   return {
     workerCount: effectiveWorkerCount,
-    tasks: distributeTasksToWorkers(tasksWithRoles, effectiveWorkerCount),
+    tasks,
   };
 }
 
