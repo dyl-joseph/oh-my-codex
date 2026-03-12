@@ -134,6 +134,7 @@ export async function transitionTaskStatus(
   from: TeamTaskStatus,
   to: TeamTaskStatus,
   claimToken: string,
+  terminalData: { result?: string; error?: string } | undefined,
   deps: TransitionDeps,
 ): Promise<TransitionTaskResult> {
   if (!deps.canTransitionTaskStatus(from, to)) return { ok: false, error: 'invalid_transition' };
@@ -152,10 +153,14 @@ export async function transitionTaskStatus(
     }
     if (new Date(v.claim.leased_until) <= new Date()) return { ok: false as const, error: 'lease_expired' as const };
 
+    const normalizedResult = typeof terminalData?.result === 'string' ? terminalData.result : undefined;
+    const normalizedError = typeof terminalData?.error === 'string' ? terminalData.error : undefined;
     const updated: TeamTaskV2 = {
       ...v,
       status: to,
       completed_at: new Date().toISOString(),
+      result: to === 'completed' ? normalizedResult : undefined,
+      error: to === 'failed' ? normalizedError : undefined,
       claim: undefined,
       version: v.version + 1,
     };

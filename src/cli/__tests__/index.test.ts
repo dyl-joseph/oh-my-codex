@@ -10,6 +10,7 @@ import {
   buildWindowsPromptCommand,
   buildTmuxSessionName,
   resolveCliInvocation,
+  commandOwnsLocalHelp,
   resolveCodexLaunchPolicy,
   classifyCodexExecFailure,
   resolveSignalExitCode,
@@ -287,7 +288,28 @@ describe('resolveTeamWorkerLaunchArgsEnv (spark)', () => {
   });
 });
 
+describe('commandOwnsLocalHelp', () => {
+  it('returns true for nested commands that render their own help output', () => {
+    for (const command of ['agents-init', 'ask', 'deepinit', 'hooks', 'hud', 'ralph', 'resume', 'session', 'sparkshell', 'team', 'tmux-hook']) {
+      assert.equal(commandOwnsLocalHelp(command), true, `expected ${command} to own local help`);
+    }
+  });
+
+  it('returns false for top-level help-only commands', () => {
+    for (const command of ['help', 'launch', 'version']) {
+      assert.equal(commandOwnsLocalHelp(command), false, `expected ${command} to use top-level help`);
+    }
+  });
+});
+
 describe('resolveCliInvocation', () => {
+  it('resolves explore to explore command', () => {
+    assert.deepEqual(resolveCliInvocation(['explore', '--prompt', 'find', 'auth']), {
+      command: 'explore',
+      launchArgs: [],
+    });
+  });
+
   it('resolves ask to ask command', () => {
     assert.deepEqual(resolveCliInvocation(['ask', 'claude', 'hello']), {
       command: 'ask',

@@ -42,13 +42,15 @@ omx team "debug flaky integration tests"
 omx team ralph "ship end-to-end fix with verification"
 ```
 
-### Why `team ralph` exists as a separate launch form
+### Why `team ralph` exists as a linked launch path
 
 `omx team ralph ...` is not just shorthand for "run team now, decide on Ralph
-later." It creates a linked team+Ralph lifecycle from launch time.
+later." It creates a linked team+Ralph lifecycle from launch time while still
+using the normal `omx team` runtime startup path.
 
-- **Linked lifecycle/state:** the team run is marked `linked_ralph`, Ralph is
-  marked `linked_team`, and team terminal phases can propagate into Ralph state.
+- **Linked lifecycle/state:** launch marks team state with `linked_ralph`,
+  creates/updates Ralph state with `linked_team`, and team terminal phases can
+  propagate into Ralph state.
 - **Cleanup/shutdown:** linked cancellation and shutdown happen in order: team
   cleanup first, then Ralph terminalization/cleanup metadata.
 - **Operator choice:**
@@ -110,6 +112,8 @@ Before launching `omx team`, require a grounded context snapshot:
 
 Do not start worker panes until this gate is satisfied; if forced to proceed quickly, state explicit scope/risk limitations in the launch report.
 
+For simple read-only brownfield lookups during intake, follow active session guidance: when `USE_OMX_EXPLORE_CMD` is enabled, prefer `omx explore` with narrow, concrete prompts; otherwise use the richer normal explore path and fall back normally if `omx explore` is unavailable.
+
 ## Follow-up Staffing Contract
 
 When `$team` is used as a follow-up mode from ralplan, carry forward the approved plan's explicit **available-agent-types roster** and convert it into concrete staffing guidance before launch:
@@ -169,7 +173,12 @@ Team mode resolves worker **model flags** from one shared launch-arg set (not pe
 Model precedence (highest to lowest):
 1. Explicit worker model in `OMX_TEAM_WORKER_LAUNCH_ARGS`
 2. Inherited leader `--model` flag
-3. Low-complexity default from `OMX_SPARK_MODEL` (currently `gpt-5.3-codex-spark`) when 1+2 are absent and team `agentType` is low-complexity
+3. Low-complexity default from `OMX_DEFAULT_SPARK_MODEL` (legacy alias: `OMX_SPARK_MODEL`) when 1+2 are absent and team `agentType` is low-complexity
+
+Default-model rule:
+- Do **not** assume a frontier or spark model from recency or model-family heuristics.
+- Use `OMX_DEFAULT_FRONTIER_MODEL` for frontier-default guidance.
+- Use `OMX_DEFAULT_SPARK_MODEL` for spark/low-complexity worker-default guidance.
 
 Thinking-level rule (critical):
 - **No model-name heuristic mapping.**
@@ -357,6 +366,7 @@ Use only after checking `omx team status <team>` and mailbox/state evidence:
 
 1. Capture pane tail to confirm current worker state:
    - `tmux capture-pane -t %<worker-pane> -p -S -120`
+   - If a larger-tail read or bounded summary would help, prefer explicit opt-in inspection via `omx sparkshell --tmux-pane %<worker-pane> --tail-lines 400` before improvising extra tmux commands.
 2. If the pane is stuck in an interactive state, safely return to idle prompt first:
    - optional interrupt `C-c` or escape flow (CLI-specific) once, then re-check pane capture
 3. Send one concise trigger (single line) and wait for evidence:
@@ -449,6 +459,7 @@ When operating this skill, provide concrete progress evidence:
 
 Do not claim success without file/pane evidence.
 Do not claim clean completion if shutdown occurred with `in_progress>0`.
+Use `omx sparkshell --tmux-pane ...` as an explicit opt-in operator aid for pane inspection and summaries; keep raw `tmux capture-pane` evidence available for manual intervention and proof.
 
 ## MCP Job Lifecycle Tools
 

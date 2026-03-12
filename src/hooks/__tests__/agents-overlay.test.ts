@@ -55,6 +55,24 @@ describe('generateOverlay', () => {
     assert.doesNotMatch(defaultOverlay, /\*\*Orchestration Mode:\*\* team/);
   });
 
+  it('adds advisory explore routing guidance only when USE_OMX_EXPLORE_CMD is enabled', async () => {
+    const previous = process.env.USE_OMX_EXPLORE_CMD;
+    try {
+      delete process.env.USE_OMX_EXPLORE_CMD;
+      const disabledOverlay = await generateOverlay(tempDir, 'explore-routing-off');
+      assert.doesNotMatch(disabledOverlay, /\*\*Explore Command Preference:\*\*/);
+
+      process.env.USE_OMX_EXPLORE_CMD = '1';
+      const enabledOverlay = await generateOverlay(tempDir, 'explore-routing-on');
+      assert.match(enabledOverlay, /\*\*Explore Command Preference:\*\* enabled via `USE_OMX_EXPLORE_CMD`/);
+      assert.match(enabledOverlay, /strongly prefer `omx explore`/);
+      assert.match(enabledOverlay, /advisory steering/i);
+    } finally {
+      if (typeof previous === 'string') process.env.USE_OMX_EXPLORE_CMD = previous;
+      else delete process.env.USE_OMX_EXPLORE_CMD;
+    }
+  });
+
   it('generates overlay with active modes', async () => {
     const sessionId = 'test-session-2';
     const sessionDir = join(tempDir, '.omx', 'state', 'sessions', sessionId);
@@ -236,6 +254,35 @@ describe('resolveSessionOrchestrationMode', () => {
 
     const mode = await resolveSessionOrchestrationMode(tempDir, sessionId);
     assert.equal(mode, 'default');
+  });
+
+  it('does not resurrect stale root team skill state when session-scoped skill state is inactive', async () => {
+    const sessionId = 'sess-team-complete';
+    const rootStatePath = join(tempDir, '.omx', 'state', 'skill-active-state.json');
+    const sessionDir = join(tempDir, '.omx', 'state', 'sessions', sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      rootStatePath,
+      JSON.stringify({ active: true, skill: 'team' }),
+    );
+    await writeFile(
+      join(sessionDir, 'skill-active-state.json'),
+      JSON.stringify({ active: false, skill: 'team', phase: 'completing' }),
+    );
+
+    const mode = await resolveSessionOrchestrationMode(tempDir, sessionId);
+    assert.equal(mode, 'default');
+  });
+
+  it('falls back to root team skill state only when no session-scoped skill state exists', async () => {
+    const sessionId = 'sess-root-fallback';
+    await writeFile(
+      join(tempDir, '.omx', 'state', 'skill-active-state.json'),
+      JSON.stringify({ active: true, skill: 'team' }),
+    );
+
+    const mode = await resolveSessionOrchestrationMode(tempDir, sessionId);
+    assert.equal(mode, 'team');
   });
 });
 

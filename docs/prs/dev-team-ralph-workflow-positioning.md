@@ -29,7 +29,7 @@ The docs position `ralplan` as the place where team follow-up should become more
 - Better support for mixed-CLI teams and runtime-heavy edge-case work
 
 ## Validation
-- [ ] `npm run build`
+- [ ] `npm run build` *(TypeScript build)*
 - [ ] `npm test`
 
 ## Related

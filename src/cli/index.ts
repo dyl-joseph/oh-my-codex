@@ -16,6 +16,8 @@ import { hudCommand } from '../hud/index.js';
 import { teamCommand } from './team.js';
 import { ralphCommand } from './ralph.js';
 import { askCommand } from './ask.js';
+import { exploreCommand } from './explore.js';
+import { sparkshellCommand } from './sparkshell.js';
 import { agentsInitCommand } from './agents-init.js';
 import { sessionCommand } from './session-search.js';
 import {
@@ -95,6 +97,7 @@ Usage:
   omx doctor --team  Check team/swarm runtime health diagnostics
   omx ask       Ask local provider CLI (claude|gemini) and write artifact output
   omx resume    Resume a previous interactive Codex session
+  omx explore   Default read-only exploration entrypoint (may adaptively use sparkshell backend)
   omx session   Search prior local session transcripts and history artifacts
   omx agents-init [path]
                 Bootstrap lightweight AGENTS.md files for a repo/subtree
@@ -106,6 +109,10 @@ Usage:
   omx tmux-hook Manage tmux prompt injection workaround (init|status|validate|test)
   omx hooks     Manage hook plugins (init|status|validate|test)
   omx hud       Show HUD statusline (--watch, --json, --preset=NAME)
+  omx sparkshell <command> [args...]
+  omx sparkshell --tmux-pane <pane-id> [--tail-lines <100-1000>]
+                Run native sparkshell sidecar for direct command execution or explicit tmux-pane summarization
+                (also used as an adaptive backend for qualifying read-only explore tasks)
   omx help      Show this help message
   omx status    Show active modes and state
   omx cancel    Cancel active execution modes
@@ -157,7 +164,21 @@ const ALLOWED_SHELLS = new Set([
 ]);
 const WINDOWS_DETACHED_BOOTSTRAP_DELAY_MS = 2500;
 
-type CliCommand = 'launch' | 'setup' | 'agents-init' | 'deepinit' | 'uninstall' | 'doctor' | 'ask' | 'team' | 'session' | 'resume' | 'version' | 'tmux-hook' | 'hooks' | 'hud' | 'status' | 'cancel' | 'help' | 'reasoning' | string;
+type CliCommand = 'launch' | 'setup' | 'agents-init' | 'deepinit' | 'uninstall' | 'doctor' | 'ask' | 'explore' | 'sparkshell' | 'team' | 'session' | 'resume' | 'version' | 'tmux-hook' | 'hooks' | 'hud' | 'status' | 'cancel' | 'help' | 'reasoning' | string;
+
+const NESTED_HELP_COMMANDS = new Set<CliCommand>([
+  'ask',
+  'agents-init',
+  'deepinit',
+  'hooks',
+  'hud',
+  'ralph',
+  'resume',
+  'session',
+  'sparkshell',
+  'team',
+  'tmux-hook',
+]);
 
 export interface ResolvedCliInvocation {
   command: CliCommand;
@@ -247,6 +268,10 @@ export function resolveCliInvocation(args: string[]): ResolvedCliInvocation {
 
 export function resolveNotifyTempContract(args: string[], env: NodeJS.ProcessEnv = process.env): ParseNotifyTempContractResult {
   return parseNotifyTempContractFromArgs(args, env);
+}
+
+export function commandOwnsLocalHelp(command: CliCommand): boolean {
+  return NESTED_HELP_COMMANDS.has(command);
 }
 
 export type CodexLaunchPolicy = 'inside-tmux' | 'direct';
@@ -400,12 +425,11 @@ export function buildHudPaneCleanupTargets(existingPaneIds: string[], createdPan
 
 export async function main(args: string[]): Promise<void> {
   const knownCommands = new Set([
-    'launch', 'setup', 'agents-init', 'deepinit', 'uninstall', 'doctor', 'ask', 'team', 'ralph', 'session', 'resume', 'version', 'tmux-hook', 'hooks', 'hud', 'status', 'cancel', 'help', '--help', '-h',
+    'launch', 'setup', 'agents-init', 'deepinit', 'uninstall', 'doctor', 'ask', 'explore', 'sparkshell', 'team', 'ralph', 'session', 'resume', 'version', 'tmux-hook', 'hooks', 'hud', 'status', 'cancel', 'help', '--help', '-h',
   ]);
   const firstArg = args[0];
   const { command, launchArgs } = resolveCliInvocation(args);
   const flags = new Set(args.filter(a => a.startsWith('--')));
-  const ralphHelpRequested = firstArg === 'ralph' && (args[1] === '--help' || args[1] === '-h');
   const options = {
     force: flags.has('--force'),
     dryRun: flags.has('--dry-run'),
@@ -413,7 +437,7 @@ export async function main(args: string[]): Promise<void> {
     team: flags.has('--team'),
   };
 
-  if (flags.has('--help') && !ralphHelpRequested && !new Set(['team', 'session', 'agents-init', 'deepinit', 'resume']).has(command)) {
+  if (flags.has('--help') && !commandOwnsLocalHelp(command)) {
     console.log(HELP);
     return;
   }
@@ -456,6 +480,12 @@ export async function main(args: string[]): Promise<void> {
       }
       case 'ask':
         await askCommand(args.slice(1));
+        break;
+      case 'explore':
+        await exploreCommand(args.slice(1));
+        break;
+      case 'sparkshell':
+        await sparkshellCommand(args.slice(1));
         break;
       case 'team':
         await teamCommand(args.slice(1), options);

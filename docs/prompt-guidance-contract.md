@@ -185,7 +185,7 @@ Before opening a PR that changes prompt text, confirm all of the following:
 For prompt-guidance edits, run at least:
 
 ```bash
-npm run build
+npm run build   # TypeScript build
 node --test \
   dist/hooks/__tests__/prompt-guidance-contract.test.js \
   dist/hooks/__tests__/prompt-guidance-wave-two.test.js \

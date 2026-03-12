@@ -70,7 +70,7 @@ Low-token Team Mode profile example:
 
 ```bash
 OMX_TEAM_WORKER_CLI=codex \
-OMX_TEAM_WORKER_LAUNCH_ARGS='--model gpt-5.3-codex-spark -c model_reasoning_effort="low"' \
+OMX_TEAM_WORKER_LAUNCH_ARGS='-c model_reasoning_effort="low"' \
 omx team 2:explore "short scoped analysis task"
 ```
 
@@ -104,6 +104,34 @@ omx doctor --team
 omx team 3:executor "ship the scoped task with verification"
 ```
 
+## Model defaults and local-model overrides
+
+OMX treats default model selection as a small explicit contract:
+
+- `OMX_DEFAULT_FRONTIER_MODEL` — canonical frontier/default leader model
+- `OMX_DEFAULT_SPARK_MODEL` — canonical spark / low-complexity worker model
+
+If upstream defaults change, update the single canonical source instead of scattering model literals across prompts/docs/runtime.
+
+For local-model setups, you can persist overrides in `~/.codex/.omx-config.json` (or `CODEX_HOME/.omx-config.json`) under the top-level `env` field:
+
+```json
+{
+  "env": {
+    "OMX_DEFAULT_FRONTIER_MODEL": "your-frontier-model",
+    "OMX_DEFAULT_SPARK_MODEL": "your-spark-model"
+  }
+}
+```
+
+Resolution order:
+
+1. Real shell env vars
+2. `.omx-config.json` `env` overrides
+3. OMX built-in canonical defaults
+
+The same config-driven env overrides are forwarded when OMX launches native helpers such as `omx sparkshell`, so local-model routing stays consistent.
+
 Recommended trusted-environment launch profile:
 
 ```bash
@@ -113,7 +141,7 @@ omx --xhigh --madmax
 ## New in v0.5.0
 
 - **Scope-aware setup** with `omx setup --scope user|project` for flexible install modes.
-- **Spark worker routing** via `--spark` / `--madmax-spark` so team workers can use `gpt-5.3-codex-spark` without forcing the leader model.
+- **Spark worker routing** via `--spark` / `--madmax-spark` so team workers use the `OMX_DEFAULT_SPARK_MODEL` default without forcing the leader model.
 - **Catalog consolidation** — removed deprecated prompts (`deep-executor`, `scientist`) and 9 deprecated skills for a leaner surface.
 - **Notifier verbosity levels** for fine-grained CCNotifier output control.
 
@@ -133,6 +161,8 @@ From terminal:
 ```bash
 omx team 4:executor "parallelize a multi-module refactor"
 omx team status <team-name>
+omx team status <team-name> --json
+omx team status <team-name> --tail-lines 600
 omx team resume <team-name>
 omx team shutdown <team-name>
 ```
@@ -170,11 +200,13 @@ This is designed to make OMX's initial routing behavior more Sisyphus-like witho
 
 ### How to test this experiment
 
-1. Build the project:
+1. Build the project (TypeScript + native Rust helpers):
 
 ```bash
-npm run build
+npm run build:full
 ```
+
+If you only need the TypeScript output, `npm run build` still runs just `tsc`.
 
 2. Reinstall native agent configs:
 
@@ -211,6 +243,7 @@ omx doctor         # Installation/runtime diagnostics
 omx doctor --team  # Team Mode diagnostics
 omx ask ...        # Ask local provider advisor (claude|gemini), writes .omx/artifacts/*
 omx resume         # Resume a previous interactive Codex session
+omx explore ...    # Default read-only exploration entrypoint (may use sparkshell backend)
 omx ralph          # Launch Codex with ralph persistence mode active
 omx status         # Show active modes
 omx cancel         # Cancel active execution modes
@@ -234,6 +267,42 @@ omx ask gemini --agent-prompt=planner --prompt "draft a rollout plan"
 # gemini -p|--prompt "<prompt>"
 ```
 
+Explore command examples:
+
+```bash
+omx explore --prompt "which files define team routing"
+omx explore --prompt-file prompts/explore-task.md
+USE_OMX_EXPLORE_CMD=1 omx   # advisory preference for simple read-only exploration prompts
+```
+
+`omx explore` is the default OMX surface for simple read-only exploration. It stays intentionally read-only and shell-only, and qualifying shell-native read-only tasks may be routed through `omx sparkshell` as a backend when that is the cheaper/more direct fit. The routing flag only adds advisory steering in generated session instructions; ambiguous or implementation-heavy requests stay on the normal Codex path, and OMX falls back normally if the explore harness is unavailable. The harness constrains Codex through a temporary allowlisted shell/bin layer so only approved repository-inspection command families are available during the offloaded run.
+
+- Current shell allowlist: `rg`, `grep`, `ls`, `find`, `wc`, `cat`, `head`, `tail`, `pwd`, `printf`
+- Current shell restrictions: no pipes, redirection, `&&`, `||`, `;`, subshells, path-qualified binaries, non-allowlisted commands, stdin-fed inspection, or path escapes outside the target repository (including existing symlink-resolved escapes)
+- `omx explore` is **not** a full parity surface for modern Codex read-only mode: it does not promise web search, MCP, images, or general-purpose tool access
+
+Packaging / install notes:
+
+- Published npm packages now include the Rust workspace files for the explore harness (`Cargo.toml`, `Cargo.lock`, `crates/`).
+- npm publishes no longer rely on publisher-platform native binaries.
+- Tagged releases build multi-platform native archives for both `omx-explore-harness` and `omx-sparkshell` via cargo-dist and attach them to the GitHub Release from `.github/workflows/release.yml`.
+- Runtime now prefers `OMX_*_BIN` overrides, then a hydrated per-user native cache, then repo-local development artifacts.
+- `omx explore` keeps a source-install `cargo run --manifest-path crates/omx-explore/Cargo.toml -- ...` fallback in repository checkouts; packaged installs rely on release-asset hydration unless `OMX_EXPLORE_BIN` is set.
+- `omx sparkshell` hydrates from release assets when no override or repo-local build output is available.
+- Release assets now include `native-release-manifest.json` with per-target download metadata and SHA-256 checksums.
+- Helpful local commands:
+
+```bash
+npm run build:full
+npm run build:explore
+npm run build:explore:release
+npm run test:explore
+node scripts/smoke-packed-install.mjs --release-assets-dir ./release-assets
+node scripts/check-version-sync.mjs --tag v$(node -p "require('./package.json').version")
+```
+
+`npm run build:full` is the one-shot source build for TypeScript plus the packaged explore harness and sparkshell native binary.
+
 Non-tmux team launch (advanced):
 
 ```bash
@@ -250,6 +319,35 @@ OMX now includes `omx hooks` for plugin scaffolding and validation.
 - Plugins are off by default; enable with `OMX_HOOK_PLUGINS=1`.
 
 See `docs/hooks-extension.md` for the full extension workflow and event model.
+
+## Sparkshell (preview)
+
+`omx sparkshell <command> [args...]` runs through a JS -> Rust sidecar bridge for fast command execution with adaptive summaries when output exceeds `OMX_SPARKSHELL_LINES`. `omx explore` now treats it as a backend for qualifying read-only shell-native tasks; `omx sparkshell` remains the explicit specialist surface for direct operator use.
+
+It remains an explicit operator-facing command, but OMX may also use it as a backend for qualifying `omx explore` read-only shell-native tasks. That backend relationship does not relax read-only safety: non-read-only or unsupported shell execution should still stay blocked or on the normal path.
+
+Current preview contract:
+- Short output stays raw; long output is summarized into markdown sections limited to `summary:`, `failures:`, and `warnings:`.
+- Summary mode uses the local Codex CLI via `codex exec` and prefers `OMX_SPARKSHELL_MODEL`, then `OMX_DEFAULT_SPARK_MODEL`, then the spark default model.
+- `--spark` / `--madmax-spark` remain team-worker launch flags; sparkshell model routing is controlled by env vars instead.
+- Native binary lookup order is `OMX_SPARKSHELL_BIN`, then the hydrated native cache, then packaged dev artifacts (when present), then repo-local workspace output `target/release/omx-sparkshell[.exe]`.
+- Team/leader pane summarization is explicit opt-in via tmux pane mode, for example:
+
+```bash
+omx sparkshell --tmux-pane %12 --tail-lines 400
+```
+
+- tmux pane mode captures a larger pane tail (100-1000 lines) and applies the same raw-vs-summary behavior to worker/leader pane context.
+- sparkshell pane summarization is not always-on; it is enabled only when explicitly requested.
+
+Preview build helpers:
+
+```bash
+npm run build:sparkshell
+npm run test:sparkshell
+```
+
+For a full local source build in one command, use `npm run build:full`.
 
 ## Launch Flags
 
@@ -318,6 +416,8 @@ omx team <args>
 omx team --help
 omx team api --help
 omx team status <team-name>
+omx team status <team-name> --json
+omx team status <team-name> --tail-lines 600
 omx team resume <team-name>
 omx team shutdown <team-name>
 ```
@@ -352,15 +452,19 @@ omx team 3:executor "execute the approved ralplan with shared runtime coordinati
 
 Planned documentation/product direction: make `ralplan` produce stronger team follow-up guidance by default, including worker placement hints and an explicit follow-up path such as `--followup team`.
 
-### Why `omx team ralph` is a distinct launch mode
+### Why `omx team ralph` is a linked launch path
 
 Use `omx team ralph ...` when the team run and Ralph follow-up should behave as
 one linked lifecycle, not as two unrelated commands.
 
-- **Linked lifecycle/state:** team starts with `linked_ralph=true`, Ralph tracks
-  `linked_team=true`, and terminal team phases propagate into Ralph state. That
-  gives one operator-visible chain for resume/cancel/final verification instead
-  of a manual handoff after the fact.
+It does **not** spin up a separate team runtime. OMX uses the normal
+`omx team` startup path, then seeds linked team/Ralph state from launch time so
+later status, shutdown, and cancel flows can observe one connected run.
+
+- **Linked lifecycle/state:** launch records `linked_ralph=true` in team state,
+  creates/updates Ralph state with `linked_team=true`, and later terminal team
+  phases propagate into Ralph state. That gives one operator-visible chain for
+  resume/cancel/final verification instead of a manual handoff after the fact.
 - **Cleanup/shutdown:** linked shutdown uses the Ralph-aware cleanup policy.
   Team cleanup happens first, Ralph is terminalized from the linked team result,
   branch rollback preserves worktree branches, and the run records linked
@@ -404,7 +508,7 @@ OMX_TEAM_AUTO_INTERRUPT_RETRY=0  # optional: disable adaptive queue->resend fall
 
 Notes:
 - Worker launch args are still shared via `OMX_TEAM_WORKER_LAUNCH_ARGS` for model/config inheritance.
-- When no explicit worker model is provided, low-complexity worker fallback follows `OMX_SPARK_MODEL` (currently `gpt-5.3-codex-spark`).
+- When no explicit worker model is provided, low-complexity worker fallback follows `OMX_DEFAULT_SPARK_MODEL` (legacy alias: `OMX_SPARK_MODEL`).
 - `OMX_TEAM_WORKER_CLI_MAP` overrides `OMX_TEAM_WORKER_CLI` for per-worker selection.
 - Team mode now allocates `model_reasoning_effort` per teammate from the resolved worker role (`low` / `medium` / `high`) unless an explicit reasoning override already exists in `OMX_TEAM_WORKER_LAUNCH_ARGS`.
 - When a worker resolves to a concrete task role, OMX composes a per-worker startup instructions file that layers the corresponding role prompt on top of the shared team worker protocol; explicit `model_instructions_file` launch overrides still win.
@@ -426,12 +530,13 @@ Notes:
   - `notify = ["node", "..."]`
   - `model_reasoning_effort = "high"`
   - `developer_instructions = "..."`
-  - `model = "gpt-5.4"` when root `model` is absent (matching the current `OMX_MAIN_MODEL` default)
-  - if the existing root model is `gpt-5.3-codex`, interactive `omx setup` asks whether to upgrade it to `gpt-5.4`; non-interactive runs preserve the existing model
-  - `model_context_window = 1000000` and `model_auto_compact_token_limit = 900000` only when the effective root model is `gpt-5.4` and both context keys are absent
+  - `model = "<OMX_DEFAULT_FRONTIER_MODEL>"` when root `model` is absent
+  - if the existing root model matches the legacy pre-frontier default, interactive `omx setup` asks whether to upgrade it to `OMX_DEFAULT_FRONTIER_MODEL`; non-interactive runs preserve the existing model
+  - `model_context_window = 1000000` and `model_auto_compact_token_limit = 900000` only when the effective root model matches `OMX_DEFAULT_FRONTIER_MODEL` and both context keys are absent
   - `[features] multi_agent = true, child_agents_md = true`
   - MCP server entries (`omx_state`, `omx_memory`, `omx_code_intel`, `omx_trace`)
   - If a shared MCP registry exists at `~/.omx/mcp-registry.json` (fallback: `~/.omc/mcp-registry.json`), setup syncs those entries into a dedicated managed block in `config.toml` (skipping names already defined elsewhere to avoid duplicate TOML tables)
+  - User-scoped setup also syncs missing shared MCP entries into `~/.claude/settings.json` without overwriting existing Claude Code MCP server definitions
   - `[tui] status_line`
 - Project `AGENTS.md` (project scope only)
 - `.omx/` runtime directories and HUD config
@@ -538,7 +643,7 @@ git clone https://github.com/Yeachan-Heo/oh-my-codex.git
 cd oh-my-codex
 npm install
 npm run lint
-npm run build
+npm run build:full
 npm test
 ```
 

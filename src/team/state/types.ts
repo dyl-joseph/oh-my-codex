@@ -96,6 +96,10 @@ export interface TeamPolicy {
   dispatch_ack_timeout_ms: number;
 }
 
+/**
+ * Lifecycle/workflow guardrails persisted alongside the manifest, but kept
+ * separate from transport/runtime policy so each layer has a single owner.
+ */
 export interface TeamGovernance {
   delegation_only: boolean;
   plan_approval_required: boolean;
