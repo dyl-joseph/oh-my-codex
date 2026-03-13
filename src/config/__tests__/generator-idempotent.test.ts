@@ -454,10 +454,12 @@ describe("config generator idempotency (#384)", () => {
     }
   });
 
-  it("writes only installable catalog agents into the OMX agent block", async () => {
+  it("writes only installable catalog agents into the OMX agent block when manifest is available", async () => {
     const wd = await mkdtemp(join(tmpdir(), "omx-idem-"));
     try {
       const configPath = join(wd, "config.toml");
+      await mkdir(join(wd, 'templates'), { recursive: true });
+      await writeFile(join(wd, 'templates', 'catalog-manifest.json'), await readSourceManifestRaw());
       await mergeConfig(configPath, wd);
       const toml = await readFile(configPath, "utf-8");
 
