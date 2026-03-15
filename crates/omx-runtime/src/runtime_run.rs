@@ -962,7 +962,8 @@ fn shutdown_and_emit_result(
     status: &str,
     duration_seconds: f64,
 ) -> Result<(), String> {
-    let ralph = read_linked_ralph_profile(&input.team_name, &input.cwd);
+    let ralph = resolve_runtime_lifecycle_profile(&input.team_name, &input.cwd) == "linked_ralph"
+        || read_linked_ralph_profile(&input.team_name, &input.cwd);
     let force = status != "completed";
     match shutdown_team(&input.team_name, &input.cwd, force, ralph) {
         Ok(()) => {}
@@ -992,6 +993,7 @@ fn shutdown_and_emit_result(
 
 fn shutdown_team(team_name: &str, cwd: &str, force: bool, ralph: bool) -> Result<(), String> {
     let statuses = list_task_statuses(team_name, cwd);
+    let total = statuses.len();
     let pending = statuses
         .iter()
         .filter(|status| status.status.as_str() == "pending")
@@ -1008,22 +1010,43 @@ fn shutdown_team(team_name: &str, cwd: &str, force: bool, ralph: bool) -> Result
         .iter()
         .filter(|status| status.status.as_str() == "failed")
         .count();
+    let completed = statuses
+        .iter()
+        .filter(|status| status.status.as_str() == "completed")
+        .count();
+    let lifecycle_profile = resolve_runtime_lifecycle_profile(team_name, cwd);
+    let ralph = ralph || lifecycle_profile == "linked_ralph";
 
     if !force {
-        let has_active_work = pending > 0 || blocked > 0 || in_progress > 0;
-        if has_active_work || (failed > 0 && !ralph) {
-            let _ = append_team_event(
-                team_name,
-                cwd,
-                "shutdown_gate",
-                "leader-fixed",
-                &format!(
-                    "allowed=false pending={pending} blocked={blocked} in_progress={in_progress} failed={failed}"
-                ),
-            );
-            return Err(format!(
-                "shutdown_gate_blocked:pending={pending},blocked={blocked},in_progress={in_progress},failed={failed}"
-            ));
+        let allowed = pending == 0 && blocked == 0 && in_progress == 0 && failed == 0;
+        let _ = append_team_event(
+            team_name,
+            cwd,
+            "shutdown_gate",
+            "leader-fixed",
+            &format!(
+                "allowed={allowed} total={total} pending={pending} blocked={blocked} in_progress={in_progress} completed={completed} failed={failed} cleanup_requires_all_workers_inactive=true{}",
+                if ralph { " policy=ralph" } else { "" }
+            ),
+        );
+
+        if !allowed {
+            let has_active_work = pending > 0 || blocked > 0 || in_progress > 0;
+            if ralph && !has_active_work {
+                let _ = append_team_event(
+                    team_name,
+                    cwd,
+                    "ralph_cleanup_policy",
+                    "leader-fixed",
+                    &format!(
+                        "gate_bypassed:pending={pending},blocked={blocked},in_progress={in_progress},failed={failed}"
+                    ),
+                );
+            } else {
+                return Err(format!(
+                    "shutdown_gate_blocked:pending={pending},blocked={blocked},in_progress={in_progress},failed={failed}"
+                ));
+            }
         }
     }
     if force {
@@ -2303,6 +2326,28 @@ fn read_linked_ralph_profile(team_name: &str, cwd: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn resolve_runtime_lifecycle_profile(team_name: &str, cwd: &str) -> &'static str {
+    let manifest_path = PathBuf::from(cwd)
+        .join(".omx")
+        .join("state")
+        .join("team")
+        .join(team_name)
+        .join("manifest.v2.json");
+    if read_to_string(manifest_path)
+        .ok()
+        .and_then(|raw| extract_json_string(&raw, "lifecycle_profile"))
+        .map(|profile| profile == "linked_ralph")
+        .unwrap_or(false)
+    {
+        return "linked_ralph";
+    }
+    if read_linked_ralph_profile(team_name, cwd) {
+        "linked_ralph"
+    } else {
+        "default"
+    }
+}
+
 fn resolve_lifecycle_profile(team_name: &str, cwd: &str) -> &'static str {
     let state_path = mode_state_path(cwd, "team");
     let Ok(raw) = read_to_string(state_path) else {
@@ -2762,8 +2807,9 @@ mod tests {
         collect_task_results, detect_dead_worker_failure, extract_json_bool, extract_string_array,
         finalize_team_state, has_structured_verification_evidence, initialize_team_state,
         monitor_team, parse_runtime_input, read_linked_ralph_profile, resolve_lifecycle_profile,
-        shutdown_team, split_json_array_entries, write_panes_sidecar_placeholder,
-        write_phase_state, RuntimeRunInput, RuntimeTaskInput, TeamSessionStart, WorkerCli,
+        resolve_runtime_lifecycle_profile, shutdown_team, split_json_array_entries,
+        write_panes_sidecar_placeholder, write_phase_state, RuntimeRunInput, RuntimeTaskInput,
+        TeamSessionStart, WorkerCli,
     };
     use crate::test_support::env_lock;
     use std::env;
@@ -2883,6 +2929,44 @@ mod tests {
         assert_eq!(
             resolve_lifecycle_profile("beta", temp.to_string_lossy().as_ref()),
             "default"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolves_runtime_lifecycle_profile_from_manifest_or_config() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-run-runtime-lifecycle-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        create_dir_all(&team_dir).expect("expected team dir");
+
+        write(
+            team_dir.join("manifest.v2.json"),
+            r#"{"lifecycle_profile":"linked_ralph"}"#,
+        )
+        .expect("expected manifest");
+        assert_eq!(
+            resolve_runtime_lifecycle_profile("alpha", temp.to_string_lossy().as_ref()),
+            "linked_ralph"
+        );
+
+        write(
+            team_dir.join("manifest.v2.json"),
+            r#"{"lifecycle_profile":"default"}"#,
+        )
+        .expect("expected manifest overwrite");
+        write(
+            team_dir.join("config.json"),
+            r#"{"lifecycle_profile":"linked_ralph"}"#,
+        )
+        .expect("expected config");
+        assert_eq!(
+            resolve_runtime_lifecycle_profile("alpha", temp.to_string_lossy().as_ref()),
+            "linked_ralph"
         );
 
         let _ = std::fs::remove_dir_all(&temp);
@@ -3665,6 +3749,90 @@ mod tests {
         assert!(ralph_state.contains("\"linked_team_terminal_phase\":\"cancelled\""));
         assert!(ralph_state.contains("\"linked_team_terminal_at\":\""));
         assert!(ralph_state.contains("\"completed_at\":\""));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn shutdown_team_logs_detailed_gate_counts_when_blocked() {
+        let temp =
+            std::env::temp_dir().join(format!("omx-runtime-shutdown-gate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        let tasks_dir = team_dir.join("tasks");
+        create_dir_all(&tasks_dir).expect("expected task dir");
+        write(
+            team_dir.join("config.json"),
+            r#"{"name":"alpha","worker_launch_mode":"interactive","lifecycle_profile":"default","workers":[],"tmux_session":"omx-team-alpha","leader_pane_id":null,"hud_pane_id":null,"resize_hook_name":null,"resize_hook_target":null}"#,
+        )
+        .expect("expected team config");
+        write(
+            team_dir.join("manifest.v2.json"),
+            r#"{"lifecycle_profile":"default"}"#,
+        )
+        .expect("expected manifest");
+        write(
+            tasks_dir.join("task-1.json"),
+            r#"{"id":"1","status":"failed"}"#,
+        )
+        .expect("expected task file");
+
+        let error = shutdown_team("alpha", temp.to_string_lossy().as_ref(), false, false)
+            .expect_err("expected blocked shutdown");
+        assert!(error.contains("shutdown_gate_blocked:pending=0,blocked=0,in_progress=0,failed=1"));
+
+        let events = read_to_string(team_dir.join("events").join("events.ndjson"))
+            .expect("expected event log");
+        assert!(events.contains("\"type\":\"shutdown_gate\""));
+        assert!(events.contains("allowed=false total=1 pending=0 blocked=0 in_progress=0 completed=0 failed=1 cleanup_requires_all_workers_inactive=true"));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn shutdown_team_allows_linked_ralph_failure_only_bypass() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-shutdown-ralph-bypass-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        let tasks_dir = team_dir.join("tasks");
+        create_dir_all(&tasks_dir).expect("expected task dir");
+        write(
+            team_dir.join("config.json"),
+            r#"{"name":"alpha","worker_launch_mode":"interactive","lifecycle_profile":"linked_ralph","workers":[],"tmux_session":"omx-team-alpha","leader_pane_id":null,"hud_pane_id":null,"resize_hook_name":null,"resize_hook_target":null}"#,
+        )
+        .expect("expected team config");
+        write(
+            team_dir.join("manifest.v2.json"),
+            r#"{"lifecycle_profile":"linked_ralph"}"#,
+        )
+        .expect("expected manifest");
+        write(
+            temp.join(".omx").join("state").join("team-state.json"),
+            r#"{"active":true,"current_phase":"team-exec","linked_ralph":true,"team_name":"alpha"}"#,
+        )
+        .expect("expected team state");
+        write(
+            temp.join(".omx").join("state").join("ralph-state.json"),
+            r#"{"active":true,"iteration":1,"max_iterations":10,"current_phase":"executing","started_at":"2026-03-11T00:00:00.000Z","linked_team":true}"#,
+        )
+        .expect("expected ralph state");
+        write(
+            tasks_dir.join("task-1.json"),
+            r#"{"id":"1","status":"failed"}"#,
+        )
+        .expect("expected task file");
+
+        shutdown_team("alpha", temp.to_string_lossy().as_ref(), false, false)
+            .expect("expected linked ralph bypass");
+
+        let ralph_state = read_to_string(temp.join(".omx").join("state").join("ralph-state.json"))
+            .expect("expected ralph state");
+        assert!(ralph_state.contains("\"current_phase\":\"cancelled\""));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
