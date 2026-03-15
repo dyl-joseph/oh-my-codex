@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'child_process';
 import { mkdtemp, rm, writeFile, readFile, mkdir, chmod } from 'fs/promises';
@@ -175,6 +175,17 @@ async function withMockTmuxFixture<T>(
 }
 
 describe('runtime', () => {
+  const previousTeamStateRoot = process.env.OMX_TEAM_STATE_ROOT;
+
+  before(() => {
+    delete process.env.OMX_TEAM_STATE_ROOT;
+  });
+
+  after(() => {
+    if (typeof previousTeamStateRoot === 'string') process.env.OMX_TEAM_STATE_ROOT = previousTeamStateRoot;
+    else delete process.env.OMX_TEAM_STATE_ROOT;
+  });
+
   it('resolveWorkerLaunchArgsFromEnv injects low-complexity default model when missing', () => {
     const args = resolveWorkerLaunchArgsFromEnv(
       { OMX_TEAM_WORKER_LAUNCH_ARGS: '--no-alt-screen' },
