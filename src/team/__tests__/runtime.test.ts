@@ -35,6 +35,7 @@ import {
   type TeamRuntime,
 } from '../runtime.js';
 import { resolveTeamLowComplexityDefaultModel } from '../model-contract.js';
+import { readTeamEvents } from '../state/events.js';
 
 async function initRepo(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), 'omx-runtime-worktree-repo-'));
@@ -1759,6 +1760,55 @@ process.on('SIGTERM', () => {
       assert.match(content, /\"type\":\"worker_idle\"/);
     } finally {
       await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('monitorTeam persists integration ledger and cherry-picks unseen worker HEADs once', async () => {
+    const repo = await initRepo();
+    try {
+      execFileSync('git', ['worktree', 'add', '-b', 'worker-1-branch', '../worker-1-wt', 'HEAD'], { cwd: repo, stdio: 'ignore' });
+      const workerPath = join(repo, '..', 'worker-1-wt');
+      await writeFile(join(workerPath, 'worker.txt'), 'from worker\n', 'utf-8');
+      execFileSync('git', ['add', 'worker.txt'], { cwd: workerPath, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'worker change'], { cwd: workerPath, stdio: 'ignore' });
+      const workerHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workerPath, encoding: 'utf-8' }).trim();
+
+      await initTeamState('team-integration-ledger', 'integration ledger test', 'executor', 1, repo);
+      const cfg = await readTeamConfig('team-integration-ledger', repo);
+      assert.ok(cfg);
+      if (!cfg) throw new Error('missing team config');
+      cfg.leader_pane_id = '';
+      cfg.workers[0] = {
+        ...cfg.workers[0],
+        assigned_tasks: ['1'],
+        worktree_repo_root: repo,
+        worktree_path: workerPath,
+        worktree_branch: 'worker-1-branch',
+        worktree_detached: false,
+        worktree_created: false,
+      };
+      await saveTeamConfig(cfg, repo);
+
+      await monitorTeam('team-integration-ledger', repo);
+      const firstSnapshot = await readMonitorSnapshot('team-integration-ledger', repo);
+      assert.equal(firstSnapshot?.integrationByWorker?.['worker-1']?.last_seen_head, workerHead);
+      assert.equal(typeof firstSnapshot?.integrationByWorker?.['worker-1']?.last_integrated_head, 'string');
+      assert.equal(firstSnapshot?.integrationByWorker?.['worker-1']?.status, 'idle');
+      assert.equal(typeof firstSnapshot?.integrationByWorker?.['worker-1']?.last_rebased_leader_head, 'string');
+
+      await monitorTeam('team-integration-ledger', repo);
+      const secondSnapshot = await readMonitorSnapshot('team-integration-ledger', repo);
+      assert.equal(typeof secondSnapshot?.integrationByWorker?.['worker-1']?.last_seen_head, 'string');
+      assert.equal(typeof secondSnapshot?.integrationByWorker?.['worker-1']?.last_integrated_head, 'string');
+
+      const events = await readTeamEvents('team-integration-ledger', repo, { wakeableOnly: false });
+      assert.equal(events.filter((event) => event.type === 'worker_cherry_pick_detected').length, 1);
+      assert.equal(events.filter((event) => event.type === 'worker_cherry_pick_applied').length, 1);
+      const leaderMailbox = await listMailboxMessages('team-integration-ledger', 'leader-fixed', repo);
+      assert.equal(leaderMailbox.some((message) => /INTEGRATED: cherry-picked/.test(message.body)), true);
+    } finally {
+      await rm(join(repo, '..', 'worker-1-wt'), { recursive: true, force: true });
+      await rm(repo, { recursive: true, force: true });
     }
   });
 

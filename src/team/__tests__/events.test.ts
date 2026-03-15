@@ -71,6 +71,26 @@ describe('team/state/events', () => {
         },
       }, cwd);
       await appendTeamEvent('wakeable-matrix', {
+        type: 'worker_cherry_pick_conflict',
+        worker: 'worker-1',
+        task_id: '1',
+        reason: 'cherry-pick conflict',
+        metadata: {
+          worktree_path: '/tmp/team/worktrees/worker-1',
+          conflict_files: ['src/team/runtime.ts'],
+        },
+      }, cwd);
+      await appendTeamEvent('wakeable-matrix', {
+        type: 'worker_rebase_conflict',
+        worker: 'worker-1',
+        task_id: '1',
+        reason: 'rebase conflict',
+        metadata: {
+          worktree_path: '/tmp/team/worktrees/worker-1',
+          conflict_files: ['src/team/runtime.ts'],
+        },
+      }, cwd);
+      await appendTeamEvent('wakeable-matrix', {
         type: 'worker_stale_stdout',
         worker: 'worker-2',
         reason: 'stdout stale',
@@ -85,10 +105,12 @@ describe('team/state/events', () => {
       });
       assert.deepEqual(
         wakeable.map((event) => event.type),
-        ['worker_merge_conflict', 'worker_stale_stdout'],
+        ['worker_merge_conflict', 'worker_cherry_pick_conflict', 'worker_rebase_conflict', 'worker_stale_stdout'],
       );
       assert.equal(wakeable[0]?.metadata?.diff_path, '/tmp/team/worktrees/worker-1/.omx/diff.md');
-      assert.equal(wakeable[1]?.metadata?.stale_window_ms, 30000);
+      assert.deepEqual(wakeable[1]?.metadata?.conflict_files, ['src/team/runtime.ts']);
+      assert.deepEqual(wakeable[2]?.metadata?.conflict_files, ['src/team/runtime.ts']);
+      assert.equal(wakeable[3]?.metadata?.stale_window_ms, 30000);
 
       const all = await readTeamEvents('wakeable-matrix', cwd, {
         afterEventId: baseline.event_id,
@@ -96,7 +118,7 @@ describe('team/state/events', () => {
       });
       assert.deepEqual(
         all.map((event) => event.type),
-        ['worker_merge_conflict', 'worker_stale_stdout'],
+        ['worker_merge_conflict', 'worker_cherry_pick_conflict', 'worker_rebase_conflict', 'worker_stale_stdout'],
       );
     } finally {
       await cleanup();

@@ -70,6 +70,7 @@ import {
   type TeamManifestV2,
   type TeamMonitorSnapshotState,
   type TeamPhaseState,
+  type TeamWorkerIntegrationState,
   type TeamGovernance,
   type TeamPolicy,
 } from './team-ops.js';
@@ -340,6 +341,196 @@ function summarizeWorktreeDiffWithSparkShell(worktreePath: string): string | nul
   const result = runCommand('omx', ['sparkshell', 'sh', '-lc', shellCommand], worktreePath);
   if (!result.ok || !result.stdout) return null;
   return result.stdout;
+}
+
+function resolveWorkerHead(worktreePath: string): string | null {
+  const head = runGitCommand(worktreePath, ['rev-parse', 'HEAD'], worktreePath);
+  return head.ok && head.stdout ? head.stdout : null;
+}
+
+function resolveLeaderHead(repoRoot: string, leaderCwd: string): string | null {
+  const head = runGitCommand(repoRoot, ['rev-parse', 'HEAD'], leaderCwd);
+  return head.ok && head.stdout ? head.stdout : null;
+}
+
+function listCommitRange(repoRoot: string, baseRef: string, headRef: string, cwd: string): string[] {
+  if (!baseRef || !headRef || baseRef === headRef) return [];
+  const range = runGitCommand(repoRoot, ['rev-list', '--reverse', `${baseRef}..${headRef}`], cwd);
+  if (!range.ok || !range.stdout) return [];
+  return range.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+function listConflictFiles(repoRoot: string, cwd: string): string[] {
+  const result = runGitCommand(repoRoot, ['diff', '--name-only', '--diff-filter=U'], cwd);
+  if (!result.ok || !result.stdout) return [];
+  return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+async function appendIntegrationEvent(
+  teamName: string,
+  type: 'worker_cherry_pick_detected' | 'worker_cherry_pick_applied' | 'worker_cherry_pick_conflict' | 'worker_rebase_applied' | 'worker_rebase_conflict',
+  worker: WorkerInfo,
+  metadata: Record<string, unknown>,
+  cwd: string,
+): Promise<void> {
+  await appendTeamEvent(teamName, {
+    type,
+    worker: worker.name,
+    task_id: worker.assigned_tasks[0],
+    reason: typeof metadata.summary === 'string' ? metadata.summary : undefined,
+    metadata,
+  }, cwd);
+}
+
+async function sendIntegrationMessageToLeader(
+  teamName: string,
+  worker: WorkerInfo,
+  body: string,
+  cwd: string,
+): Promise<void> {
+  await sendWorkerMessage(teamName, worker.name, 'leader-fixed', body, cwd).catch(() => {});
+}
+
+async function sendRebaseConflictMessageToWorker(
+  teamName: string,
+  worker: WorkerInfo,
+  body: string,
+  cwd: string,
+): Promise<void> {
+  await sendWorkerMessage(teamName, 'leader-fixed', worker.name, body, cwd).catch(() => {});
+}
+
+async function integrateWorkerCommitsIntoLeader(params: {
+  teamName: string;
+  config: TeamConfig;
+  previous: TeamMonitorSnapshotState | null;
+  cwd: string;
+}): Promise<Record<string, TeamWorkerIntegrationState>> {
+  const { teamName, config, previous, cwd } = params;
+  const next: Record<string, TeamWorkerIntegrationState> = { ...(previous?.integrationByWorker ?? {}) };
+
+  for (const worker of config.workers) {
+    if (!worker.worktree_repo_root || !worker.worktree_path || !existsSync(worker.worktree_path)) continue;
+    const repoRoot = resolve(worker.worktree_repo_root);
+    const worktreePath = resolve(worker.worktree_path);
+    const leaderHead = resolveLeaderHead(repoRoot, cwd);
+    const workerHead = resolveWorkerHead(worktreePath);
+    const previousState = next[worker.name] ?? {};
+    const state: TeamWorkerIntegrationState = { ...previousState, last_leader_head: leaderHead ?? previousState.last_leader_head };
+    if (!workerHead || !leaderHead) {
+      next[worker.name] = state;
+      continue;
+    }
+
+    state.last_seen_head = workerHead;
+    const alreadyMerged = runGitCommand(repoRoot, ['merge-base', '--is-ancestor', workerHead, 'HEAD'], cwd).ok;
+    if (alreadyMerged) {
+      state.last_integrated_head = workerHead;
+      state.status = 'idle';
+      state.updated_at = new Date().toISOString();
+      next[worker.name] = state;
+      continue;
+    }
+
+    const baseline = state.last_integrated_head && runGitCommand(repoRoot, ['rev-parse', '--verify', state.last_integrated_head], worktreePath).ok
+      ? state.last_integrated_head
+      : leaderHead;
+    const commits = listCommitRange(repoRoot, baseline, workerHead, worktreePath);
+    if (commits.length === 0) {
+      next[worker.name] = state;
+      continue;
+    }
+
+    for (const commit of commits) {
+      await appendIntegrationEvent(teamName, 'worker_cherry_pick_detected', worker, {
+        worker_name: worker.name,
+        worker_head: workerHead,
+        commit,
+        leader_head: resolveLeaderHead(repoRoot, cwd),
+        worktree_path: worktreePath,
+        summary: `detected worker commit ${commit.slice(0, 12)}`,
+      }, cwd);
+
+      const pick = runGitCommand(repoRoot, ['cherry-pick', '--allow-empty', commit], cwd);
+      if (!pick.ok) {
+        const conflictFiles = listConflictFiles(repoRoot, cwd);
+        runGitCommand(repoRoot, ['cherry-pick', '--abort'], cwd);
+        state.status = 'cherry_pick_conflict';
+        state.conflict_commit = commit;
+        state.conflict_files = conflictFiles;
+        state.updated_at = new Date().toISOString();
+        await appendIntegrationEvent(teamName, 'worker_cherry_pick_conflict', worker, {
+          worker_name: worker.name,
+          commit,
+          leader_head: leaderHead,
+          worktree_path: worktreePath,
+          conflict_files: conflictFiles,
+          stderr: pick.stderr || pick.stdout,
+          summary: `cherry-pick conflict for ${worker.name} at ${commit.slice(0, 12)}`,
+        }, cwd);
+        await sendIntegrationMessageToLeader(teamName, worker, `CONFLICT: ${worker.name} cherry-pick ${commit.slice(0, 12)} conflicted. Resolve in leader repo. Files: ${conflictFiles.join(', ') || 'unknown'}.` , cwd);
+        next[worker.name] = state;
+        break;
+      }
+
+      const newLeaderHead = resolveLeaderHead(repoRoot, cwd) ?? leaderHead;
+      state.last_integrated_head = commit;
+      state.last_leader_head = newLeaderHead;
+      state.status = 'integrated';
+      state.conflict_commit = undefined;
+      state.conflict_files = undefined;
+      state.updated_at = new Date().toISOString();
+      await appendIntegrationEvent(teamName, 'worker_cherry_pick_applied', worker, {
+        worker_name: worker.name,
+        commit,
+        leader_head_before: leaderHead,
+        leader_head_after: newLeaderHead,
+        worktree_path: worktreePath,
+        summary: `cherry-picked ${commit.slice(0, 12)} from ${worker.name}`,
+      }, cwd);
+      await sendIntegrationMessageToLeader(teamName, worker, `INTEGRATED: cherry-picked ${commit.slice(0, 12)} from ${worker.name} into leader HEAD ${newLeaderHead.slice(0, 12)}.`, cwd);
+
+      const rebase = runGitCommand(repoRoot, ['rebase', newLeaderHead], worktreePath);
+      if (!rebase.ok) {
+        const conflictFiles = listConflictFiles(repoRoot, worktreePath);
+        state.status = 'rebase_conflict';
+        state.last_rebased_leader_head = newLeaderHead;
+        state.conflict_commit = commit;
+        state.conflict_files = conflictFiles;
+        state.updated_at = new Date().toISOString();
+        await appendIntegrationEvent(teamName, 'worker_rebase_conflict', worker, {
+          worker_name: worker.name,
+          commit,
+          leader_head: newLeaderHead,
+          worktree_path: worktreePath,
+          conflict_files: conflictFiles,
+          stderr: rebase.stderr || rebase.stdout,
+          summary: `rebase conflict for ${worker.name} onto ${newLeaderHead.slice(0, 12)}`,
+        }, cwd);
+        await sendIntegrationMessageToLeader(teamName, worker, `CONFLICT: ${worker.name} rebase onto ${newLeaderHead.slice(0, 12)} conflicted. Files: ${conflictFiles.join(', ') || 'unknown'}.`, cwd);
+        await sendRebaseConflictMessageToWorker(teamName, worker, `REBASE CONFLICT: rebase your worktree onto ${newLeaderHead}. Resolve files: ${conflictFiles.join(', ') || 'unknown'}, then continue rebase in your worktree.`, cwd);
+        next[worker.name] = state;
+        break;
+      }
+
+      state.status = 'idle';
+      state.last_rebased_leader_head = newLeaderHead;
+      state.conflict_commit = undefined;
+      state.conflict_files = undefined;
+      state.updated_at = new Date().toISOString();
+      await appendIntegrationEvent(teamName, 'worker_rebase_applied', worker, {
+        worker_name: worker.name,
+        commit,
+        leader_head: newLeaderHead,
+        worktree_path: worktreePath,
+        summary: `rebased ${worker.name} worktree onto ${newLeaderHead.slice(0, 12)}`,
+      }, cwd);
+    }
+
+    next[worker.name] = state;
+  }
+
+  return next;
 }
 
 function renderWorktreeMergeReport(report: WorkerShutdownMergeReport): string {
@@ -1620,6 +1811,12 @@ export async function monitorTeam(teamName: string, cwd: string): Promise<TeamSn
   }
 
   await emitMonitorDerivedEvents(sanitized, taskView, workers, previousSnapshot, config.worker_launch_mode, cwd);
+  const integrationByWorker = await integrateWorkerCommitsIntoLeader({
+    teamName: sanitized,
+    config,
+    previous: previousSnapshot,
+    cwd,
+  });
   const mailboxDeliveryStartMs = performance.now();
   const mailboxNotifiedByMessageId = await deliverPendingMailboxMessages(
     sanitized,
@@ -1659,6 +1856,7 @@ export async function monitorTeam(teamName: string, cwd: string): Promise<TeamSn
         workerTaskIdByName: Object.fromEntries(workers.map((w) => [w.name, w.status.current_task_id ?? ''])),
         mailboxNotifiedByMessageId,
         completedEventTaskIds: previousSnapshot?.completedEventTaskIds ?? {},
+        integrationByWorker,
         monitorTimings: {
           list_tasks_ms: Number(listTasksMs.toFixed(2)),
           worker_scan_ms: Number(workerScanMs.toFixed(2)),
