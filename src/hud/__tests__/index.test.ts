@@ -27,6 +27,14 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function waitFor(predicate: () => boolean, attempts = 20): Promise<void> {
+  for (let index = 0; index < attempts; index += 1) {
+    if (predicate()) return;
+    await flush();
+  }
+  assert.ok(predicate(), 'condition should become true before timeout');
+}
+
 afterEach(() => {
   process.exitCode = undefined;
 });
@@ -111,8 +119,7 @@ describe('runWatchMode', () => {
     timerTick?.();
 
     releaseFirstRender?.();
-    await flush();
-    await flush();
+    await waitFor(() => callCount === 2);
 
     sigintHandler?.();
     await promise;
