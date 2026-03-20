@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-## [0.11.3] - 2026-03-20
+
+## [0.11.4] - 2026-03-20
+
 
 Hotfix release for team worker delivery regressions.
 
