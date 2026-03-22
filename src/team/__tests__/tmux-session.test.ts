@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, readFile, rm, writeFile, chmod } from 'fs/promises';
+import { mkdtemp, readFile, rm, writeFile, chmod, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -33,6 +33,7 @@ import {
   killWorkerByPaneId,
   teardownWorkerPanes,
   listTeamSessions,
+  resolveTeamPlayPaneSpec,
   resolveTeamWorkerCli,
   resolveTeamWorkerLaunchMode,
   resolveWorkerCliForSend,
@@ -137,6 +138,57 @@ describe('chooseTeamLeaderPaneId', () => {
       { paneId: '%3', currentCommand: 'node', startCommand: "node omx hud --watch" },
     ];
     assert.equal(chooseTeamLeaderPaneId(panes, '%2'), '%2');
+  });
+});
+
+describe('resolveTeamPlayPaneSpec', () => {
+  it('returns null when no play pane command is configured and no sibling dino-game exists', () => {
+    const env = {} as NodeJS.ProcessEnv;
+    assert.equal(resolveTeamPlayPaneSpec('/tmp/demo', env), null);
+  });
+
+  it('uses configured command, cwd, and height when provided', () => {
+    const env = {
+      OMX_TEAM_PLAY_PANE_CMD: 'cargo run',
+      OMX_TEAM_PLAY_PANE_CWD: '/tmp/dino',
+      OMX_TEAM_PLAY_PANE_HEIGHT_LINES: '22',
+    } as NodeJS.ProcessEnv;
+    assert.deepEqual(resolveTeamPlayPaneSpec('/tmp/demo', env), {
+      cmd: 'cargo run',
+      cwd: '/tmp/dino',
+      heightLines: 22,
+    });
+  });
+
+  it('falls back to leader cwd and clamps height into a safe range', () => {
+    const env = {
+      OMX_TEAM_PLAY_PANE_CMD: 'cargo run',
+      OMX_TEAM_PLAY_PANE_HEIGHT_LINES: '2',
+    } as NodeJS.ProcessEnv;
+    assert.deepEqual(resolveTeamPlayPaneSpec('/tmp/demo', env), {
+      cmd: 'cargo run',
+      cwd: '/tmp/demo',
+      heightLines: 8,
+    });
+  });
+
+  it('auto-detects a sibling dino-game Cargo.toml when no command is configured', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omx-play-pane-'));
+    const leader = join(root, 'oh-my-codex');
+    const dino = join(root, 'dino-game');
+    await mkdir(leader, { recursive: true });
+    await mkdir(dino, { recursive: true });
+    await writeFile(join(dino, 'Cargo.toml'), '[package]\nname=\"dino-game\"\n');
+
+    try {
+      assert.deepEqual(resolveTeamPlayPaneSpec(leader, {} as NodeJS.ProcessEnv), {
+        cmd: 'cargo run',
+        cwd: dino,
+        heightLines: 18,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

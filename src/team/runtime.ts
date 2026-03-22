@@ -1561,6 +1561,7 @@ export async function startTeam(
       config.tmux_session = sessionName;
       config.leader_pane_id = createdSession.leaderPaneId;
       config.hud_pane_id = createdSession.hudPaneId;
+      config.play_pane_id = createdSession.playPaneId;
       config.resize_hook_name = createdSession.resizeHookName;
       config.resize_hook_target = createdSession.resizeHookTarget;
       for (let i = 0; i < createdSession.workerPaneIds.length; i++) {
@@ -1570,6 +1571,7 @@ export async function startTeam(
       config.tmux_session = `prompt-${sanitized}`;
       config.leader_pane_id = null;
       config.hud_pane_id = null;
+      config.play_pane_id = null;
       config.resize_hook_name = null;
       config.resize_hook_target = null;
       for (let i = 1; i <= workerCount; i++) {
@@ -1751,6 +1753,13 @@ export async function startTeam(
         if (config?.hud_pane_id) {
           try {
             await killWorkerByPaneIdAsync(config.hud_pane_id, createdLeaderPaneId);
+          } catch (err) {
+            process.stderr.write(`[team/runtime] operation failed: ${err}\n`);
+          }
+        }
+        if (config?.play_pane_id) {
+          try {
+            await killWorkerByPaneIdAsync(config.play_pane_id, createdLeaderPaneId);
           } catch (err) {
             process.stderr.write(`[team/runtime] operation failed: ${err}\n`);
           }
@@ -2363,6 +2372,7 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
   // 3. Force kill remaining workers
   const leaderPaneId = config.leader_pane_id;
   const hudPaneId = config.hud_pane_id;
+  const playPaneId = config.play_pane_id;
   if (config.worker_launch_mode === 'interactive') {
     let resizeHookWarning: string | null = null;
     if (config.resize_hook_name && config.resize_hook_target) {
@@ -2389,13 +2399,16 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
       leaderPaneId,
       hudPaneId,
     });
+    if (playPaneId && playPaneId !== hudPaneId) {
+      await killWorkerByPaneIdAsync(playPaneId, leaderPaneId ?? undefined);
+    }
     if (hudPaneId) {
       await killWorkerByPaneIdAsync(hudPaneId, leaderPaneId ?? undefined);
-      if (sessionName.includes(':')) {
-        const restoredHudPaneId = restoreStandaloneHudPane(leaderPaneId, cwd);
-        if (!restoredHudPaneId) {
-          console.warn(`[team shutdown] ${sanitized}: failed to restore standalone HUD pane`);
-        }
+    }
+    if ((hudPaneId || playPaneId) && sessionName.includes(':')) {
+      const restoredHudPaneId = restoreStandaloneHudPane(leaderPaneId, cwd);
+      if (!restoredHudPaneId) {
+        console.warn(`[team shutdown] ${sanitized}: failed to restore standalone HUD pane`);
       }
     }
 

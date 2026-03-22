@@ -1150,6 +1150,140 @@ exit 0
     }
   });
 
+  it('startTeam launches sibling dino-game as a play pane and restores HUD after shutdown', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omx-runtime-play-pane-'));
+    const cwd = join(root, 'oh-my-codex');
+    const dinoCwd = join(root, 'dino-game');
+    const previousTmux = process.env.TMUX;
+    const previousTmuxPane = process.env.TMUX_PANE;
+    const previousLaunchMode = process.env.OMX_TEAM_WORKER_LAUNCH_MODE;
+    const previousWorkerCli = process.env.OMX_TEAM_WORKER_CLI;
+    let runtime: TeamRuntime | null = null;
+    try {
+      await mkdir(cwd, { recursive: true });
+      await mkdir(dinoCwd, { recursive: true });
+      await writeFile(join(dinoCwd, 'Cargo.toml'), '[package]\nname="dino-game"\n', 'utf-8');
+
+      await withMockTmuxFixture(
+        {
+          dirPrefix: 'omx-runtime-play-pane-bin-',
+          tmuxScript: (tmuxLogPath) => `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "${tmuxLogPath}"
+case "\${1:-}" in
+  -V)
+    echo "tmux 3.4"
+    exit 0
+    ;;
+  display-message)
+    case "$*" in
+      *"#{window_width}"*)
+        echo "120"
+        ;;
+      *)
+        echo "leader:0 %1"
+        ;;
+    esac
+    exit 0
+    ;;
+  list-panes)
+    case "$*" in
+      *"pane_current_command"* )
+        printf "%%1\\tnode\\t'codex'\\n"
+        ;;
+      *"#{pane_dead} #{pane_pid}"*)
+        echo "1 999999"
+        ;;
+      *"#{pane_pid}"*)
+        echo "999999"
+        ;;
+      *)
+        exit 0
+        ;;
+    esac
+    exit 0
+    ;;
+  split-window)
+    case "$*" in
+      *" -h "*)
+        echo "%2"
+        ;;
+      *"cargo run"*)
+        echo "%4"
+        ;;
+      *)
+        echo "%5"
+        ;;
+    esac
+    exit 0
+    ;;
+  set-hook|run-shell|select-layout|set-window-option|select-pane|send-keys|kill-pane|kill-session)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`,
+          binaries: [{
+            name: 'gemini',
+            content: `#!/bin/sh
+exit 0
+`,
+          }],
+        },
+        async ({ tmuxLogPath }) => {
+          process.env.TMUX = 'leader-session,stub,0';
+          process.env.TMUX_PANE = '%1';
+          process.env.OMX_TEAM_WORKER_LAUNCH_MODE = 'interactive';
+          process.env.OMX_TEAM_WORKER_CLI = 'gemini';
+
+          runtime = await withoutTeamWorkerEnv(() =>
+            startTeam(
+              'team-play-pane',
+              'launch dino play pane',
+              'explore',
+              1,
+              [{ subject: 'inspect', description: 'inspect', owner: 'worker-1' }],
+              cwd,
+            ));
+
+          assert.equal(runtime.config.hud_pane_id, null);
+          assert.equal(runtime.config.play_pane_id, '%4');
+
+          await shutdownTeam(runtime.teamName, cwd, { force: true });
+          runtime = null;
+
+          const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+          const escapedDinoCwd = dinoCwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          assert.match(
+            tmuxLog,
+            new RegExp(`split-window -v -l 18 -t %1 -d -P -F #\\{pane_id\\} -c ${escapedDinoCwd} cargo run`),
+          );
+          assert.doesNotMatch(tmuxLog, /hud --watch.*leader:0/);
+          assert.doesNotMatch(tmuxLog, /set-hook -t leader:0 client-resized/);
+          assert.match(tmuxLog, /kill-pane -t %4/);
+          assert.match(tmuxLog, new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %1 -d -P -F #\\{pane_id\\}`));
+          assert.match(tmuxLog, /hud --watch/);
+        },
+      );
+    } finally {
+      const activeRuntime = runtime;
+      if (activeRuntime) {
+        await shutdownTeam((activeRuntime as TeamRuntime).teamName, cwd, { force: true }).catch(() => {});
+      }
+      if (typeof previousTmux === 'string') process.env.TMUX = previousTmux;
+      else delete process.env.TMUX;
+      if (typeof previousTmuxPane === 'string') process.env.TMUX_PANE = previousTmuxPane;
+      else delete process.env.TMUX_PANE;
+      if (typeof previousLaunchMode === 'string') process.env.OMX_TEAM_WORKER_LAUNCH_MODE = previousLaunchMode;
+      else delete process.env.OMX_TEAM_WORKER_LAUNCH_MODE;
+      if (typeof previousWorkerCli === 'string') process.env.OMX_TEAM_WORKER_CLI = previousWorkerCli;
+      else delete process.env.OMX_TEAM_WORKER_CLI;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('startTeam routes detached worktree worker inbox and mailbox triggers through leader-root state references', async () => {
     const repo = await initRepo();
     const toolingDir = await mkdtemp(join(tmpdir(), 'omx-runtime-worktree-tools-'));

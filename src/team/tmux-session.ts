@@ -1,7 +1,7 @@
 import { spawnSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import {
   CODEX_BYPASS_FLAG,
   MADMAX_FLAG,
@@ -29,8 +29,10 @@ export interface TeamSession {
   workerPaneIds: string[];
   /** Leader's own pane ID — must never be targeted by worker cleanup routines. */
   leaderPaneId: string;
-  /** HUD pane spawned below the leader column, or null if creation failed. */
+  /** HUD pane spawned below the leader column, or null if creation failed or skipped. */
   hudPaneId: string | null;
+  /** Optional play pane spawned below the leader column when configured. */
+  playPaneId: string | null;
   /** Registered tmux resize hook name for the HUD pane, or null if unavailable. */
   resizeHookName: string | null;
   /** Registered tmux resize hook target in "<session>:<window>" form, or null. */
@@ -45,12 +47,16 @@ const OMX_TEAM_WORKER_CLI_ENV = 'OMX_TEAM_WORKER_CLI';
 const OMX_TEAM_WORKER_CLI_MAP_ENV = 'OMX_TEAM_WORKER_CLI_MAP';
 const OMX_TEAM_WORKER_LAUNCH_MODE_ENV = 'OMX_TEAM_WORKER_LAUNCH_MODE';
 const OMX_TEAM_AUTO_INTERRUPT_RETRY_ENV = 'OMX_TEAM_AUTO_INTERRUPT_RETRY';
+const OMX_TEAM_PLAY_PANE_CMD_ENV = 'OMX_TEAM_PLAY_PANE_CMD';
+const OMX_TEAM_PLAY_PANE_CWD_ENV = 'OMX_TEAM_PLAY_PANE_CWD';
+const OMX_TEAM_PLAY_PANE_HEIGHT_LINES_ENV = 'OMX_TEAM_PLAY_PANE_HEIGHT_LINES';
 const CLAUDE_SKIP_PERMISSIONS_FLAG = '--dangerously-skip-permissions';
 const GEMINI_PROMPT_INTERACTIVE_FLAG = '-i';
 const GEMINI_APPROVAL_MODE_FLAG = '--approval-mode';
 const GEMINI_APPROVAL_MODE_YOLO = 'yolo';
 const OMX_LEADER_NODE_PATH_ENV = 'OMX_LEADER_NODE_PATH';
 const OMX_LEADER_CLI_PATH_ENV = 'OMX_LEADER_CLI_PATH';
+const DEFAULT_TEAM_PLAY_PANE_HEIGHT_LINES = 18;
 
 export type TeamWorkerCli = 'codex' | 'claude' | 'gemini';
 type TeamWorkerCliMode = 'auto' | TeamWorkerCli;
@@ -67,6 +73,12 @@ export interface WorkerSubmitPlan {
 interface WorkerLaunchSpec {
   shell: string;
   rcFile: string | null;
+}
+
+export interface TeamPlayPaneSpec {
+  cmd: string;
+  cwd: string;
+  heightLines: number;
 }
 
 export interface WorkerProcessLaunchSpec {
@@ -299,6 +311,38 @@ function buildHudResizeCommand(hudPaneId: string, heightLines: number = HUD_TMUX
 
 function buildBestEffortShellCommand(command: string): string {
   return `${command} >/dev/null 2>&1 || true`;
+}
+
+function resolvePlayPaneHeightLines(raw: string | undefined): number {
+  const parsed = Number.parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_TEAM_PLAY_PANE_HEIGHT_LINES;
+  const normalized = Math.floor(parsed);
+  if (normalized < 8) return 8;
+  if (normalized > 40) return 40;
+  return normalized;
+}
+
+export function resolveTeamPlayPaneSpec(
+  leaderCwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): TeamPlayPaneSpec | null {
+  const cmd = String(env[OMX_TEAM_PLAY_PANE_CMD_ENV] ?? '').trim();
+  if (cmd === '') {
+    const siblingDinoCwd = resolve(leaderCwd, '..', 'dino-game');
+    if (!existsSync(join(siblingDinoCwd, 'Cargo.toml'))) return null;
+    return {
+      cmd: 'cargo run',
+      cwd: siblingDinoCwd,
+      heightLines: resolvePlayPaneHeightLines(env[OMX_TEAM_PLAY_PANE_HEIGHT_LINES_ENV]),
+    };
+  }
+
+  const paneCwd = String(env[OMX_TEAM_PLAY_PANE_CWD_ENV] ?? '').trim() || leaderCwd;
+  return {
+    cmd,
+    cwd: paneCwd,
+    heightLines: resolvePlayPaneHeightLines(env[OMX_TEAM_PLAY_PANE_HEIGHT_LINES_ENV]),
+  };
 }
 
 /** Upper bound for tmux hook indices (signed 32-bit max). */
@@ -862,57 +906,84 @@ export function createTeamSession(
       }
     }
 
-    // Re-create a single team HUD as a full-width bottom strip spanning both
-    // leader + worker columns. Keep this after layout sizing so the main
-    // leader/worker topology stays readable and the HUD remains compact.
-    // Capture the HUD pane ID so it can be tracked and excluded from worker cleanup.
+    // Re-create a single auxiliary pane after layout sizing so it does not get
+    // mixed into the worker stack. Prefer a configured play pane; otherwise use
+    // the team HUD bottom strip.
     let hudPaneId: string | null = null;
+    let playPaneId: string | null = null;
     let resizeHookName: string | null = null;
     let resizeHookTarget: string | null = null;
-    const omxEntry = process.argv[1];
-    if (omxEntry && omxEntry.trim() !== '') {
-      const hudCmd = `node ${shellQuoteSingle(translatePathForMsys(omxEntry))} hud --watch`;
-      const hudCwd = translatePathForMsys(cwd);
-      const hudResult = runTmux([
-        'split-window', '-v', '-f', '-l', String(HUD_TMUX_TEAM_HEIGHT_LINES), '-t', teamTarget, '-d', '-P', '-F', '#{pane_id}', '-c', hudCwd, hudCmd,
+    const playPaneSpec = resolveTeamPlayPaneSpec(cwd, process.env);
+    if (playPaneSpec) {
+      const playPaneCwd = translatePathForMsys(playPaneSpec.cwd);
+      const playResult = runTmux([
+        'split-window',
+        '-v',
+        '-l',
+        String(playPaneSpec.heightLines),
+        '-t',
+        leaderPaneId,
+        '-d',
+        '-P',
+        '-F',
+        '#{pane_id}',
+        '-c',
+        playPaneCwd,
+        playPaneSpec.cmd,
       ]);
-      if (hudResult.ok) {
-        const id = hudResult.stdout.split('\n')[0]?.trim() ?? '';
+      if (playResult.ok) {
+        const id = playResult.stdout.split('\n')[0]?.trim() ?? '';
         if (id.startsWith('%')) {
-          hudPaneId = id;
-          rollbackPaneIds.push(hudPaneId);
+          playPaneId = id;
+          rollbackPaneIds.push(playPaneId);
+        }
+      }
+    } else {
+      const omxEntry = process.argv[1];
+      if (omxEntry && omxEntry.trim() !== '') {
+        const hudCmd = `node ${shellQuoteSingle(translatePathForMsys(omxEntry))} hud --watch`;
+        const hudCwd = translatePathForMsys(cwd);
+        const hudResult = runTmux([
+          'split-window', '-v', '-f', '-l', String(HUD_TMUX_TEAM_HEIGHT_LINES), '-t', teamTarget, '-d', '-P', '-F', '#{pane_id}', '-c', hudCwd, hudCmd,
+        ]);
+        if (hudResult.ok) {
+          const id = hudResult.stdout.split('\n')[0]?.trim() ?? '';
+          if (id.startsWith('%')) {
+            hudPaneId = id;
+            rollbackPaneIds.push(hudPaneId);
 
-          resizeHookTarget = buildResizeHookTarget(sessionName, windowIndex);
-          resizeHookName = buildResizeHookName(safeTeamName, sessionName, windowIndex, hudPaneId);
-          const registerHook = runTmux(buildRegisterResizeHookArgs(resizeHookTarget, resizeHookName, hudPaneId));
-          if (!registerHook.ok) {
-            throw new Error(`failed to register resize hook ${resizeHookName}: ${registerHook.stderr}`);
-          }
-          registeredResizeHook = { name: resizeHookName, target: resizeHookTarget };
+            resizeHookTarget = buildResizeHookTarget(sessionName, windowIndex);
+            resizeHookName = buildResizeHookName(safeTeamName, sessionName, windowIndex, hudPaneId);
+            const registerHook = runTmux(buildRegisterResizeHookArgs(resizeHookTarget, resizeHookName, hudPaneId));
+            if (!registerHook.ok) {
+              throw new Error(`failed to register resize hook ${resizeHookName}: ${registerHook.stderr}`);
+            }
+            registeredResizeHook = { name: resizeHookName, target: resizeHookTarget };
 
-          const clientAttachedHookName = buildClientAttachedReconcileHookName(
-            safeTeamName,
-            sessionName,
-            windowIndex,
-            hudPaneId,
-          );
-          const registerClientAttachedHook = runTmux(
-            buildRegisterClientAttachedReconcileArgs(resizeHookTarget, clientAttachedHookName, hudPaneId),
-          );
-          if (!registerClientAttachedHook.ok) {
-            throw new Error(
-              `failed to register client-attached reconcile hook ${clientAttachedHookName}: ${registerClientAttachedHook.stderr}`,
+            const clientAttachedHookName = buildClientAttachedReconcileHookName(
+              safeTeamName,
+              sessionName,
+              windowIndex,
+              hudPaneId,
             );
-          }
-          registeredClientAttachedHook = { name: clientAttachedHookName, target: resizeHookTarget };
+            const registerClientAttachedHook = runTmux(
+              buildRegisterClientAttachedReconcileArgs(resizeHookTarget, clientAttachedHookName, hudPaneId),
+            );
+            if (!registerClientAttachedHook.ok) {
+              throw new Error(
+                `failed to register client-attached reconcile hook ${clientAttachedHookName}: ${registerClientAttachedHook.stderr}`,
+              );
+            }
+            registeredClientAttachedHook = { name: clientAttachedHookName, target: resizeHookTarget };
 
-          const delayed = runTmux(buildScheduleDelayedHudResizeArgs(hudPaneId));
-          if (!delayed.ok) {
-            throw new Error(`failed to schedule delayed HUD resize: ${delayed.stderr}`);
-          }
-          const reconcile = runTmux(buildReconcileHudResizeArgs(hudPaneId));
-          if (!reconcile.ok) {
-            throw new Error(`failed to reconcile HUD resize: ${reconcile.stderr}`);
+            const delayed = runTmux(buildScheduleDelayedHudResizeArgs(hudPaneId));
+            if (!delayed.ok) {
+              throw new Error(`failed to schedule delayed HUD resize: ${delayed.stderr}`);
+            }
+            const reconcile = runTmux(buildReconcileHudResizeArgs(hudPaneId));
+            if (!reconcile.ok) {
+              throw new Error(`failed to reconcile HUD resize: ${reconcile.stderr}`);
+            }
           }
         }
       }
@@ -936,6 +1007,7 @@ export function createTeamSession(
       workerPaneIds,
       leaderPaneId,
       hudPaneId,
+      playPaneId,
       resizeHookName,
       resizeHookTarget,
     };
