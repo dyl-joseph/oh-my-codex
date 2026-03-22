@@ -21,6 +21,7 @@ export interface TeamConfig {
   leader_pane_id: string | null;
   hud_pane_id: string | null;
   play_pane_id: string | null;
+  play_process_pid: number | null;
   resize_hook_name: string | null;
   resize_hook_target: string | null;
   next_worker_index?: number;
@@ -177,6 +178,7 @@ export interface TeamManifestV2 {
   leader_pane_id: string | null;
   hud_pane_id: string | null;
   play_pane_id: string | null;
+  play_process_pid: number | null;
   resize_hook_name: string | null;
   resize_hook_target: string | null;
   next_worker_index?: number;

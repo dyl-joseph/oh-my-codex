@@ -33,7 +33,7 @@ import {
   killWorkerByPaneId,
   teardownWorkerPanes,
   listTeamSessions,
-  resolveTeamPlayPaneSpec,
+  resolveTeamPlayWindowSpec,
   resolveTeamWorkerCli,
   resolveTeamWorkerLaunchMode,
   resolveWorkerCliForSend,
@@ -141,34 +141,30 @@ describe('chooseTeamLeaderPaneId', () => {
   });
 });
 
-describe('resolveTeamPlayPaneSpec', () => {
+describe('resolveTeamPlayWindowSpec', () => {
   it('returns null when no play pane command is configured and no sibling dino-game exists', () => {
     const env = {} as NodeJS.ProcessEnv;
-    assert.equal(resolveTeamPlayPaneSpec('/tmp/demo', env), null);
+    assert.equal(resolveTeamPlayWindowSpec('/tmp/demo', env), null);
   });
 
   it('uses configured command, cwd, and height when provided', () => {
     const env = {
       OMX_TEAM_PLAY_PANE_CMD: 'cargo run',
       OMX_TEAM_PLAY_PANE_CWD: '/tmp/dino',
-      OMX_TEAM_PLAY_PANE_HEIGHT_LINES: '22',
     } as NodeJS.ProcessEnv;
-    assert.deepEqual(resolveTeamPlayPaneSpec('/tmp/demo', env), {
+    assert.deepEqual(resolveTeamPlayWindowSpec('/tmp/demo', env), {
       cmd: 'cargo run',
       cwd: '/tmp/dino',
-      heightLines: 22,
     });
   });
 
-  it('falls back to leader cwd and clamps height into a safe range', () => {
+  it('falls back to leader cwd when only a command is configured', () => {
     const env = {
       OMX_TEAM_PLAY_PANE_CMD: 'cargo run',
-      OMX_TEAM_PLAY_PANE_HEIGHT_LINES: '2',
     } as NodeJS.ProcessEnv;
-    assert.deepEqual(resolveTeamPlayPaneSpec('/tmp/demo', env), {
+    assert.deepEqual(resolveTeamPlayWindowSpec('/tmp/demo', env), {
       cmd: 'cargo run',
       cwd: '/tmp/demo',
-      heightLines: 8,
     });
   });
 
@@ -184,18 +180,16 @@ describe('resolveTeamPlayPaneSpec', () => {
     await mkdir(fakeDistCli, { recursive: true });
     await mkdir(fakeDistScripts, { recursive: true });
     await writeFile(join(fakeDistCli, 'omx.js'), '');
-    await writeFile(join(fakeDistScripts, 'team-play-pane-dock.js'), '');
+    await writeFile(join(fakeDistScripts, 'team-play-window-launch.js'), '');
     const previousArgv1 = process.argv[1];
     process.argv[1] = join(fakeDistCli, 'omx.js');
 
     try {
-      const spec = resolveTeamPlayPaneSpec(leader, {} as NodeJS.ProcessEnv);
+      const spec = resolveTeamPlayWindowSpec(leader, {} as NodeJS.ProcessEnv);
       assert.ok(spec);
       assert.equal(spec?.cwd, dino);
-      assert.equal(spec?.heightLines, 18);
-      assert.match(spec?.cmd ?? '', /team-play-pane-dock\.js/);
+      assert.match(spec?.cmd ?? '', /team-play-window-launch\.js/);
       assert.match(spec?.cmd ?? '', /--game-cwd/);
-      assert.match(spec?.cmd ?? '', /Rust Dino/);
     } finally {
       process.argv[1] = previousArgv1;
       await rm(root, { recursive: true, force: true });

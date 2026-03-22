@@ -89,6 +89,7 @@ describe('team state', () => {
       assert.equal(diskCfg.leader_pane_id, null);
       assert.equal(diskCfg.hud_pane_id, null);
       assert.equal(diskCfg.play_pane_id, null);
+      assert.equal(diskCfg.play_process_pid, null);
       assert.equal(diskCfg.resize_hook_name, null);
       assert.equal(diskCfg.resize_hook_target, null);
       assert.equal(typeof diskCfg.next_task_id, 'number');
@@ -318,6 +319,7 @@ describe('team state', () => {
       assert.equal(manifest?.leader_pane_id, null);
       assert.equal(manifest?.hud_pane_id, null);
       assert.equal(manifest?.play_pane_id, null);
+      assert.equal(manifest?.play_process_pid, null);
       assert.equal(manifest?.resize_hook_name, null);
       assert.equal(manifest?.resize_hook_target, null);
     } finally {

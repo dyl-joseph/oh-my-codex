@@ -1150,7 +1150,7 @@ exit 0
     }
   });
 
-  it('startTeam launches sibling dino-game as a play pane and restores HUD after shutdown', async () => {
+  it('startTeam launches sibling dino-game as an external play window and keeps the team HUD', async () => {
     const root = await mkdtemp(join(tmpdir(), 'omx-runtime-play-pane-'));
     const cwd = join(root, 'oh-my-codex');
     const dinoCwd = join(root, 'dino-game');
@@ -1248,21 +1248,16 @@ exit 0
               cwd,
             ));
 
-          assert.equal(runtime.config.hud_pane_id, null);
-          assert.equal(runtime.config.play_pane_id, '%4');
+          assert.equal(runtime.config.hud_pane_id, '%5');
+          assert.equal(runtime.config.play_pane_id, null);
+          assert.ok(typeof runtime.config.play_process_pid === 'number');
 
           await shutdownTeam(runtime.teamName, cwd, { force: true });
           runtime = null;
 
           const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
-          const escapedDinoCwd = dinoCwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          assert.match(
-            tmuxLog,
-            new RegExp(`split-window -v -l 18 -t %1 -d -P -F #\\{pane_id\\} -c ${escapedDinoCwd} (node .*team-play-pane-dock\\.js --game-cwd ${escapedDinoCwd}|cargo run)`),
-          );
-          assert.doesNotMatch(tmuxLog, /hud --watch.*leader:0/);
-          assert.doesNotMatch(tmuxLog, /set-hook -t leader:0 client-resized/);
-          assert.match(tmuxLog, /kill-pane -t %4/);
+          assert.doesNotMatch(tmuxLog, /team-play-pane-dock/);
+          assert.doesNotMatch(tmuxLog, /cargo run/);
           assert.match(tmuxLog, new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %1 -d -P -F #\\{pane_id\\}`));
           assert.match(tmuxLog, /hud --watch/);
         },

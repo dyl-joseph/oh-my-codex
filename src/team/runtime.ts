@@ -9,6 +9,7 @@ import {
   isTmuxAvailable,
   createTeamSession,
   buildWorkerProcessLaunchSpec,
+  resolveTeamPlayWindowSpec,
   resolveTeamWorkerCli,
   type TeamWorkerCli,
   resolveTeamWorkerCliPlan,
@@ -898,6 +899,46 @@ const previousModelInstructionsFileByTeam = new Map<string, string | undefined>(
 const PROMPT_WORKER_SIGTERM_WAIT_MS = 3_000;
 const PROMPT_WORKER_SIGKILL_WAIT_MS = 2_000;
 const PROMPT_WORKER_EXIT_POLL_MS = 100;
+const PLAY_WINDOW_SIGTERM_WAIT_MS = 2_000;
+
+function spawnDetachedPlayWindowLauncher(spec: { cwd: string; cmd: string }): number | null {
+  try {
+    const child = spawn('/bin/bash', ['-lc', spec.cmd], {
+      cwd: spec.cwd,
+      stdio: 'ignore',
+      detached: true,
+      env: process.env,
+    });
+    child.unref();
+    return child.pid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function terminateDetachedPlayWindowLauncher(pid: number | null | undefined): Promise<void> {
+  if (!pid || !Number.isFinite(pid)) return;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+
+  const exitedOnTerm = await waitForPidExit(pid, PLAY_WINDOW_SIGTERM_WAIT_MS);
+  if (exitedOnTerm) return;
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    return;
+  }
+}
 
 function resolveInstructionStateRoot(worktreePath?: string | null): string | undefined {
   return worktreePath ? WORKTREE_TRIGGER_STATE_ROOT : undefined;
@@ -1561,7 +1602,7 @@ export async function startTeam(
       config.tmux_session = sessionName;
       config.leader_pane_id = createdSession.leaderPaneId;
       config.hud_pane_id = createdSession.hudPaneId;
-      config.play_pane_id = createdSession.playPaneId;
+      config.play_pane_id = null;
       config.resize_hook_name = createdSession.resizeHookName;
       config.resize_hook_target = createdSession.resizeHookTarget;
       for (let i = 0; i < createdSession.workerPaneIds.length; i++) {
@@ -1572,6 +1613,7 @@ export async function startTeam(
       config.leader_pane_id = null;
       config.hud_pane_id = null;
       config.play_pane_id = null;
+      config.play_process_pid = null;
       config.resize_hook_name = null;
       config.resize_hook_target = null;
       for (let i = 1; i <= workerCount; i++) {
@@ -1590,6 +1632,14 @@ export async function startTeam(
         if (config.workers[i - 1]) {
           config.workers[i - 1].pid = child.pid;
         }
+      }
+    }
+    if (workerLaunchMode === 'interactive') {
+      const playWindowSpec = resolveTeamPlayWindowSpec(leaderCwd, process.env);
+      if (playWindowSpec) {
+        config.play_process_pid = spawnDetachedPlayWindowLauncher(playWindowSpec);
+      } else {
+        config.play_process_pid = null;
       }
     }
     await saveTeamConfig(config, leaderCwd);
@@ -1760,6 +1810,13 @@ export async function startTeam(
         if (config?.play_pane_id) {
           try {
             await killWorkerByPaneIdAsync(config.play_pane_id, createdLeaderPaneId);
+          } catch (err) {
+            process.stderr.write(`[team/runtime] operation failed: ${err}\n`);
+          }
+        }
+        if (config?.play_process_pid) {
+          try {
+            await terminateDetachedPlayWindowLauncher(config.play_process_pid);
           } catch (err) {
             process.stderr.write(`[team/runtime] operation failed: ${err}\n`);
           }
@@ -2373,6 +2430,7 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
   const leaderPaneId = config.leader_pane_id;
   const hudPaneId = config.hud_pane_id;
   const playPaneId = config.play_pane_id;
+  const playProcessPid = config.play_process_pid;
   if (config.worker_launch_mode === 'interactive') {
     let resizeHookWarning: string | null = null;
     if (config.resize_hook_name && config.resize_hook_target) {
@@ -2402,10 +2460,11 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
     if (playPaneId && playPaneId !== hudPaneId) {
       await killWorkerByPaneIdAsync(playPaneId, leaderPaneId ?? undefined);
     }
+    await terminateDetachedPlayWindowLauncher(playProcessPid);
     if (hudPaneId) {
       await killWorkerByPaneIdAsync(hudPaneId, leaderPaneId ?? undefined);
     }
-    if ((hudPaneId || playPaneId) && sessionName.includes(':')) {
+    if (hudPaneId && sessionName.includes(':')) {
       const restoredHudPaneId = restoreStandaloneHudPane(leaderPaneId, cwd);
       if (!restoredHudPaneId) {
         console.warn(`[team shutdown] ${sanitized}: failed to restore standalone HUD pane`);

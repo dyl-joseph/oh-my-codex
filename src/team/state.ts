@@ -83,6 +83,8 @@ export interface TeamConfig {
   hud_pane_id: string | null;
   /** Optional play pane spawned below the leader column when configured. */
   play_pane_id: string | null;
+  /** Optional detached launcher process for an external play window. */
+  play_process_pid: number | null;
   /** Registered HUD resize hook name used for window-size reconciliation. */
   resize_hook_name: string | null;
   /** Registered HUD resize hook target in "<session>:<window>" form. */
@@ -242,6 +244,7 @@ export interface TeamManifestV2 {
   leader_pane_id: string | null;
   hud_pane_id: string | null;
   play_pane_id: string | null;
+  play_process_pid: number | null;
   resize_hook_name: string | null;
   resize_hook_target: string | null;
   /** Monotonic counter for worker index assignment during scaling. */
@@ -668,6 +671,7 @@ function isTeamManifestV2(value: unknown): value is TeamManifestV2 {
   if (!(typeof v.leader_pane_id === 'string' || v.leader_pane_id === null)) return false;
   if (!(typeof v.hud_pane_id === 'string' || v.hud_pane_id === null)) return false;
   if (!(typeof v.play_pane_id === 'string' || v.play_pane_id === null || typeof v.play_pane_id === 'undefined')) return false;
+  if (!(typeof v.play_process_pid === 'number' || v.play_process_pid === null || typeof v.play_process_pid === 'undefined')) return false;
   if (!(typeof v.resize_hook_name === 'string' || v.resize_hook_name === null)) return false;
   if (!(typeof v.resize_hook_target === 'string' || v.resize_hook_target === null)) return false;
   if (!v.leader || typeof v.leader !== 'object') return false;
@@ -775,6 +779,7 @@ export async function initTeamState(
     leader_pane_id: null,
     hud_pane_id: null,
     play_pane_id: null,
+    play_process_pid: null,
     resize_hook_name: null,
     resize_hook_target: null,
     next_worker_index: workerCount + 1,
@@ -818,6 +823,7 @@ export async function initTeamState(
       leader_pane_id: null,
       hud_pane_id: null,
       play_pane_id: null,
+      play_process_pid: null,
       resize_hook_name: null,
       resize_hook_target: null,
       next_worker_index: workerCount + 1,
@@ -850,6 +856,7 @@ async function writeConfig(cfg: TeamConfig, cwd: string): Promise<void> {
       leader_pane_id: normalized.leader_pane_id,
       hud_pane_id: normalized.hud_pane_id,
       play_pane_id: normalized.play_pane_id,
+      play_process_pid: normalized.play_process_pid,
       resize_hook_name: normalized.resize_hook_name,
       resize_hook_target: normalized.resize_hook_target,
       next_worker_index: normalized.next_worker_index ?? existing.next_worker_index,
@@ -883,6 +890,7 @@ function teamConfigFromManifest(manifest: TeamManifestV2): TeamConfig {
     leader_pane_id: manifest.leader_pane_id,
     hud_pane_id: manifest.hud_pane_id,
     play_pane_id: manifest.play_pane_id,
+    play_process_pid: manifest.play_process_pid,
     resize_hook_name: manifest.resize_hook_name,
     resize_hook_target: manifest.resize_hook_target,
     next_worker_index: manifest.next_worker_index,
@@ -897,6 +905,7 @@ function normalizeTeamConfig(config: TeamConfig): TeamConfig {
     leader_pane_id: config.leader_pane_id ?? null,
     hud_pane_id: config.hud_pane_id ?? null,
     play_pane_id: config.play_pane_id ?? null,
+    play_process_pid: config.play_process_pid ?? null,
     resize_hook_name: config.resize_hook_name ?? null,
     resize_hook_target: config.resize_hook_target ?? null,
     worker_launch_mode: workerLaunchMode,
@@ -935,6 +944,7 @@ function teamManifestFromConfig(config: TeamConfig): TeamManifestV2 {
     leader_pane_id: normalized.leader_pane_id,
     hud_pane_id: normalized.hud_pane_id,
     play_pane_id: normalized.play_pane_id,
+    play_process_pid: normalized.play_process_pid,
     resize_hook_name: normalized.resize_hook_name,
     resize_hook_target: normalized.resize_hook_target,
     next_worker_index: normalized.next_worker_index,
@@ -980,6 +990,7 @@ export async function readTeamManifestV2(teamName: string, cwd: string): Promise
     return {
       ...parsedManifest,
       play_pane_id: parsedManifest.play_pane_id ?? null,
+      play_process_pid: parsedManifest.play_process_pid ?? null,
       policy: normalizeTeamPolicy(parsedManifest.policy, {
         display_mode: parsedManifest.policy?.display_mode === 'split_pane' ? 'split_pane' : 'auto',
         worker_launch_mode: parsedManifest.policy?.worker_launch_mode === 'prompt' ? 'prompt' : 'interactive',
