@@ -49,6 +49,7 @@ import {
   dismissTrustPromptIfPresent,
 } from '../tmux-session.js';
 import { HUD_RESIZE_RECONCILE_DELAY_SECONDS, HUD_TMUX_TEAM_HEIGHT_LINES } from '../../hud/constants.js';
+import * as tmuxSessionModule from '../tmux-session.js';
 
 function withEmptyPath<T>(fn: () => T): T {
   const prev = process.env.PATH;
@@ -1722,5 +1723,11 @@ exit 0
         assert.match(log, /kill-pane -t %405/);
       },
     );
+  });
+});
+
+describe('leader mailbox-only boundary', () => {
+  it('does not export direct leader pane injection helper', () => {
+    assert.equal('sendToLeaderPane' in tmuxSessionModule, false);
   });
 });

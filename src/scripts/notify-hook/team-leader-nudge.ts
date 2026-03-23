@@ -47,12 +47,21 @@ export function resolveLeaderStalenessThresholdMs() {
   return 180_000;
 }
 
-export function resolveLeaderProgressStallThresholdMs() {
+export function resolveFallbackProgressStallThresholdMs() {
   const raw = safeString(process.env.OMX_TEAM_PROGRESS_STALL_MS || '');
   const parsed = asNumber(raw);
+  // Fallback-only threshold used when worker turn-count signals are unavailable.
   // Default: 2 minutes. Guard against unreasonable values.
   if (parsed !== null && parsed >= 10_000 && parsed <= 60 * 60_000) return parsed;
   return 120_000;
+}
+
+export function resolveWorkerTurnStallThresholdMs() {
+  const raw = safeString(process.env.OMX_TEAM_WORKER_TURN_STALL_MS || '');
+  const parsed = asNumber(raw);
+  // Default: 30 seconds. Guard against unreasonable values.
+  if (parsed !== null && parsed >= 10_000 && parsed <= 10 * 60_000) return parsed;
+  return 30_000;
 }
 
 function buildStatusCheckReminder(teamName) {
@@ -108,7 +117,7 @@ function buildLeaderActionGuidance(teamName, {
     return `Next: decide whether to reconcile/merge results or gracefully shut down: omx team shutdown ${teamName}.`;
   }
   if (leaderActionState === 'stuck_waiting_on_leader') {
-    return `Next: inspect omx team status ${teamName}, read worker messages, then unblock/reassign, launch another wave, or gracefully shut down: omx team shutdown ${teamName}.`;
+    return `Next: omx team status ${teamName}; read worker messages; unblock/reassign or shutdown.`;
   }
   return buildStatusCheckReminder(teamName);
 }
@@ -330,6 +339,36 @@ async function readTeamProgressSnapshot(stateDir, teamName, workerNames) {
   };
 }
 
+function readPreviousWorkerTurnCounts(previousSignature) {
+  try {
+    const parsed = JSON.parse(previousSignature || '{}');
+    const workers = Array.isArray(parsed?.workers) ? parsed.workers : [];
+    return new Map(workers
+      .map((worker) => [safeString(worker?.worker).trim(), Number.isFinite(worker?.turn_count) ? Number(worker.turn_count) : null])
+      .filter(([workerName]) => workerName.length > 0));
+  } catch {
+    return new Map();
+  }
+}
+
+function hasWorkerTurnProgress(workerSnapshot, previousTurnCounts) {
+  return workerSnapshot.some((worker) => {
+    if (worker.state !== 'working' && worker.state !== 'blocked') return false;
+    if (!Number.isFinite(worker.turn_count) || worker.turn_count === null) return false;
+    const previousTurnCount = previousTurnCounts.get(worker.worker);
+    return Number.isFinite(previousTurnCount) && previousTurnCount !== null && worker.turn_count > previousTurnCount;
+  });
+}
+
+function hasTrackableActiveWorkerTurns(workerSnapshot, previousTurnCounts) {
+  return workerSnapshot.some((worker) => {
+    if (worker.state !== 'working' && worker.state !== 'blocked') return false;
+    if (!Number.isFinite(worker.turn_count) || worker.turn_count === null) return false;
+    const previousTurnCount = previousTurnCounts.get(worker.worker);
+    return Number.isFinite(previousTurnCount) && previousTurnCount !== null;
+  });
+}
+
 function formatDurationMs(durationMs) {
   const seconds = Math.max(1, Math.round(durationMs / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -474,7 +513,8 @@ async function emitLeaderNudgeDeferredEvent(cwd, teamName, reason, nowIso, { tmu
 export async function maybeNudgeTeamLeader({ cwd, stateDir, logsDir, preComputedLeaderStale }) {
   const intervalMs = resolveLeaderNudgeIntervalMs();
   const idleCooldownMs = resolveLeaderAllIdleNudgeCooldownMs();
-  const progressStallThresholdMs = resolveLeaderProgressStallThresholdMs();
+  const fallbackProgressStallThresholdMs = resolveFallbackProgressStallThresholdMs();
+  const workerTurnStallThresholdMs = resolveWorkerTurnStallThresholdMs();
   const nowMs = Date.now();
   const nowIso = new Date().toISOString();
   const omxDir = join(cwd, '.omx');
@@ -577,18 +617,22 @@ export async function maybeNudgeTeamLeader({ cwd, stateDir, logsDir, preComputed
     const previousSignature = safeString(prevProgress.signature || '');
     const previousProgressAtIso = safeString(prevProgress.last_progress_at || '');
     const previousProgressAtMs = previousProgressAtIso ? Date.parse(previousProgressAtIso) : NaN;
-    const progressChanged = !previousSignature || previousSignature !== progressSnapshot.signature;
+    const previousTurnCounts = readPreviousWorkerTurnCounts(previousSignature);
+    const workerTurnProgress = hasWorkerTurnProgress(progressSnapshot.workerSnapshot, previousTurnCounts);
+    const hasTrackableTurnSignals = hasTrackableActiveWorkerTurns(progressSnapshot.workerSnapshot, previousTurnCounts);
+    const progressChanged = !previousSignature || previousSignature !== progressSnapshot.signature || workerTurnProgress;
     const effectiveProgressAtMs = progressChanged || !Number.isFinite(previousProgressAtMs)
       ? nowMs
       : previousProgressAtMs;
     const effectiveProgressAtIso = new Date(effectiveProgressAtMs).toISOString();
     const stalledForMs = Math.max(0, nowMs - effectiveProgressAtMs);
+    const stallThresholdMs = hasTrackableTurnSignals ? workerTurnStallThresholdMs : fallbackProgressStallThresholdMs;
     const teamProgressStalled =
       progressSnapshot.workRemaining
       && paneStatus.alive
       && !allWorkersIdle
       && !progressChanged
-      && stalledForMs >= progressStallThresholdMs;
+      && stalledForMs >= stallThresholdMs;
     const leaderActionState = classifyLeaderActionState({
       allWorkersIdle,
       workerPanesAlive: paneStatus.alive,
