@@ -4,7 +4,7 @@
  * - resolveTeamStateDirForWorker must be exported from team-worker.js
  * - DEFAULT_STALL_PATTERNS must contain 'if you want'
  * - detectStallPattern must match 'if you want'
- * - notify-hook end-to-end auto-nudge must still inject for 'if you want'
+ * - notify-hook end-to-end should record pending stall state for 'if you want' by default
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -171,9 +171,9 @@ describe('regression-205: detectStallPattern matches "if you want"', () => {
 });
 
 // ---------------------------------------------------------------------------
-// notify-hook.js – "if you want" still triggers the injection path end-to-end
+// notify-hook.js – "if you want" records pending stall state by default
 // ---------------------------------------------------------------------------
-describe('regression-205: notify-hook still injects on "if you want"', () => {
+describe('regression-205: notify-hook records pending stall state on "if you want" by default', () => {
   let originalTeamWorker: string | undefined;
   let originalTeamStateRoot: string | undefined;
 
@@ -191,7 +191,7 @@ describe('regression-205: notify-hook still injects on "if you want"', () => {
     else process.env.OMX_TEAM_STATE_ROOT = originalTeamStateRoot;
   });
 
-  it('sends the default auto-nudge response with marker and submit keys', async () => {
+  it('does not inject immediately and instead records pending stall state', async () => {
     await withTempWorkingDir(async (cwd) => {
       const stateDir = join(cwd, '.omx', 'state');
       const logsDir = join(cwd, '.omx', 'logs');
@@ -218,13 +218,20 @@ describe('regression-205: notify-hook still injects on "if you want"', () => {
       assert.ok(existsSync(tmuxLogPath), 'expected tmux to be called');
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8');
-      assert.match(
+      assert.doesNotMatch(
         tmuxLog,
         /send-keys -t %99 -l yes, proceed \[OMX_TMUX_INJECT\]/,
-        'expected default auto-nudge response to be injected',
+        'should not inject the default auto-nudge response before the stall window elapses',
       );
-      const submitMatches = tmuxLog.match(/send-keys -t %99 C-m/g);
-      assert.ok(submitMatches && submitMatches.length >= 2, `expected at least 2 submit keys, got ${submitMatches?.length ?? 0}`);
+
+      const autoNudgeStatePath = join(stateDir, 'auto-nudge-state.json');
+      assert.ok(existsSync(autoNudgeStatePath), 'expected auto-nudge state file to be written');
+      const autoNudgeState = JSON.parse(await readFile(autoNudgeStatePath, 'utf8'));
+      assert.equal(autoNudgeState.nudgeCount, 0, 'should not increment nudge count before an elapsed stall window');
+      assert.equal(typeof autoNudgeState.pendingSignature, 'string');
+      assert.ok(autoNudgeState.pendingSignature.length > 0, 'expected a pending stall signature');
+      assert.equal(typeof autoNudgeState.pendingSince, 'string');
+      assert.ok(autoNudgeState.pendingSince.length > 0, 'expected a pendingSince timestamp');
     });
   });
 });
