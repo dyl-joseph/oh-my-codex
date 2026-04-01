@@ -249,7 +249,8 @@ export class RuntimeBridge {
         encoding: 'utf-8',
         timeout: 10_000,
         maxBuffer: 1024 * 1024,
-      });
+      windowsHide: true,
+    });
       return result;
     } catch (err: unknown) {
       const execErr = err as { stderr?: string; message?: string };

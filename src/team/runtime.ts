@@ -257,7 +257,8 @@ function runCommand(command: string, args: string[], cwd: string): CommandResult
   const result = spawnSync(command, args, {
     cwd,
     encoding: 'utf-8',
-  });
+      windowsHide: true,
+    });
   return {
     ok: result.status === 0,
     stdout: (result.stdout || '').trim(),

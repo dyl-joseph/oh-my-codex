@@ -47,6 +47,7 @@ function tryReadGitValue(cwd: string, args: string[]): string | null {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2000,
+      windowsHide: true,
     }).trim();
     return value || null;
   } catch {

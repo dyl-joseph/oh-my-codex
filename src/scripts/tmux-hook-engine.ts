@@ -223,6 +223,7 @@ export function resolveCodexPane(): string {
   try {
     const sessionName = execFileSync('tmux', ['display-message', '-t', envPane, '-p', '#S'], {
       encoding: 'utf-8', timeout: 2000,
+      windowsHide: true,
     }).trim();
     if (!sessionName) return '';
 
