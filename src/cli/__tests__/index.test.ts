@@ -33,6 +33,7 @@ import {
   resolveNotifyTempContract,
   buildNotifyTempStartupMessages,
   buildNotifyFallbackWatcherEnv,
+  runWithCodexHomeOverride,
   resolveNotifyFallbackWatcherScript,
   resolveHookDerivedWatcherScript,
   resolveNotifyHookScript,
@@ -251,6 +252,36 @@ describe("watcher script path resolution", () => {
       resolveNotifyHookScript("/pkg"),
       "/pkg/dist/scripts/notify-hook.js",
     );
+  });
+});
+
+describe("runWithCodexHomeOverride", () => {
+  it("temporarily applies CODEX_HOME and restores the previous value", async () => {
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = "/tmp/original-codex-home";
+
+    try {
+      const seen = await runWithCodexHomeOverride("/tmp/override-codex-home", async () => process.env.CODEX_HOME);
+      assert.equal(seen, "/tmp/override-codex-home");
+      assert.equal(process.env.CODEX_HOME, "/tmp/original-codex-home");
+    } finally {
+      if (typeof previous === "string") process.env.CODEX_HOME = previous;
+      else delete process.env.CODEX_HOME;
+    }
+  });
+
+  it("removes CODEX_HOME after the callback when no previous value existed", async () => {
+    const previous = process.env.CODEX_HOME;
+    delete process.env.CODEX_HOME;
+
+    try {
+      const seen = await runWithCodexHomeOverride("/tmp/project-codex-home", async () => process.env.CODEX_HOME);
+      assert.equal(seen, "/tmp/project-codex-home");
+      assert.equal(process.env.CODEX_HOME, undefined);
+    } finally {
+      if (typeof previous === "string") process.env.CODEX_HOME = previous;
+      else delete process.env.CODEX_HOME;
+    }
   });
 });
 

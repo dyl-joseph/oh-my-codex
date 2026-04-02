@@ -22,6 +22,20 @@ export OMX_OPENCLAW_COMMAND=1
 export OMX_OPENCLAW_COMMAND_TIMEOUT_MS=120000
 ```
 
+## Actual intrinsic trigger model
+
+As of April 2, 2026, OMX intrinsically emits these notification events:
+
+- `session-start` — at `omx` session launch
+- `session-idle` — after completed turns when the idle cooldown allows it
+- `session-end` — when the `omx` session exits
+
+Important caveats:
+
+- `ask-user-question` and `stop`/`session-stop` are part of the config/template schema, but they are **not currently emitted automatically** by the core runtime.
+- `ask-user-question` therefore requires either a future runtime emitter or a custom/derived hook path.
+- Notification config is resolved from `${CODEX_HOME:-$HOME/.codex}/.omx-config.json`, so project-scope setups use `./.codex/.omx-config.json` during `omx` launches.
+
 ## Prompt tuning guide (concise + context-aware)
 
 For OpenClaw integrations, the most important quality lever is the hook
@@ -111,7 +125,7 @@ Use this profile when you want detailed but quickly scannable notifications:
 ### Quick update command (jq)
 
 ```bash
-CONFIG_FILE="$HOME/.codex/.omx-config.json"
+CONFIG_FILE="${CODEX_HOME:-$HOME/.codex}/.omx-config.json"
 
 jq '.notifications.verbosity = "verbose" |
     .notifications.openclaw.hooks["session-start"].instruction = "[session-start|exec]\\nproject={{projectName}} session={{sessionId}} tmux={{tmuxSession}}\\n요약: 시작 맥락 1문장\\n우선순위: 지금 할 일 1~2개\\n주의사항: 리스크/의존성(없으면 없음)" |

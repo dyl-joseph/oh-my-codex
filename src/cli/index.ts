@@ -1580,6 +1580,29 @@ export function buildNotifyFallbackWatcherEnv(
   };
 }
 
+export async function runWithCodexHomeOverride<T>(
+  codexHomeOverride: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!codexHomeOverride) {
+    return await fn();
+  }
+
+  const hadCodeHome = Object.prototype.hasOwnProperty.call(process.env, "CODEX_HOME");
+  const previousCodeHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHomeOverride;
+
+  try {
+    return await fn();
+  } finally {
+    if (hadCodeHome) {
+      process.env.CODEX_HOME = previousCodeHome;
+    } else {
+      delete process.env.CODEX_HOME;
+    }
+  }
+}
+
 /**
  * preLaunch: Prepare environment before Codex starts.
  * 1. Generate runtime overlay + write session-scoped model instructions file
@@ -1652,11 +1675,13 @@ ${launchAppendix}`
     } else {
       delete process.env[OMX_NOTIFY_TEMP_CONTRACT_ENV];
     }
-    const { notifyLifecycle } = await import("../notifications/index.js");
-    await notifyLifecycle("session-start", {
-      sessionId,
-      projectPath: cwd,
-      projectName: basename(cwd),
+    await runWithCodexHomeOverride(codexHomeOverride, async () => {
+      const { notifyLifecycle } = await import("../notifications/index.js");
+      await notifyLifecycle("session-start", {
+        sessionId,
+        projectPath: cwd,
+        projectName: basename(cwd),
+      });
     });
   } catch (err) {
     process.stderr.write(`[cli/index] operation failed: ${err}\n`);
@@ -2159,16 +2184,18 @@ async function postLaunch(
 
   // 4. Send session-end lifecycle notification (best effort)
   try {
-    const { notifyLifecycle } = await import("../notifications/index.js");
     const durationMs = sessionStartedAt
       ? Date.now() - new Date(sessionStartedAt).getTime()
       : undefined;
-    await notifyLifecycle("session-end", {
-      sessionId,
-      projectPath: cwd,
-      projectName: basename(cwd),
-      durationMs,
-      reason: "session_exit",
+    await runWithCodexHomeOverride(codexHomeOverride, async () => {
+      const { notifyLifecycle } = await import("../notifications/index.js");
+      await notifyLifecycle("session-end", {
+        sessionId,
+        projectPath: cwd,
+        projectName: basename(cwd),
+        durationMs,
+        reason: "session_exit",
+      });
     });
   } catch (err) {
     process.stderr.write(`[cli/index] operation failed: ${err}\n`);

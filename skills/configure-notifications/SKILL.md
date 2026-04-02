@@ -29,12 +29,23 @@ Unified and only entry point for notification setup.
 - **Native integrations (first-class):** Discord, Telegram, Slack
 - **Generic extensibility integrations:** `custom_webhook_command`, `custom_cli_command`
 
+Current intrinsic runtime events:
+- `session-start`
+- `session-idle`
+- `session-end`
+
+Schema-only for now (not intrinsically emitted by core runtime):
+- `ask-user-question`
+- `stop` / `session-stop`
+
+Use `${CODEX_HOME:-$HOME/.codex}/.omx-config.json` as the effective config path so project-scope setups resolve correctly.
+
 > Standalone configure skills (`configure-discord`, `configure-telegram`, `configure-slack`, `configure-openclaw`) are removed.
 
 ## Step 1: Inspect Current State
 
 ```bash
-CONFIG_FILE="$HOME/.codex/.omx-config.json"
+CONFIG_FILE="${CODEX_HOME:-$HOME/.codex}/.omx-config.json"
 
 if [ -f "$CONFIG_FILE" ]; then
   jq -r '
