@@ -91,7 +91,14 @@ export async function sendDirectMessage(
       const bridgeMailbox = await deps.readMailbox(deps.teamName, toWorker, deps.cwd);
       const bridgeMessage = bridgeMailbox.messages.find((candidate) => candidate.message_id === msgId);
       if (bridgeMessage) {
-        msg = bridgeMessage;
+        msg = {
+          ...bridgeMessage,
+          body: bridgeMessage.body || body,
+        };
+        const shadowIndex = mailbox.messages.findIndex((candidate) => candidate.message_id === msgId);
+        if (shadowIndex >= 0) mailbox.messages[shadowIndex] = msg;
+        else mailbox.messages.push(msg);
+        await deps.writeMailbox(deps.teamName, mailbox, deps.cwd);
         created = true;
         return;
       }
