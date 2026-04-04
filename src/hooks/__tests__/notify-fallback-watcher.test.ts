@@ -487,6 +487,53 @@ describe('notify-fallback watcher', () => {
     }
   });
 
+  it('suppresses authority-only control-plane ticks when only skill-active-state carries the deep-interview input lock', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-authority-skill-lock-'));
+    try {
+      await mkdir(join(wd, '.omx', 'logs'), { recursive: true });
+      await mkdir(join(wd, '.omx', 'state'), { recursive: true });
+      await writeFile(join(wd, '.omx', 'state', 'skill-active-state.json'), JSON.stringify({
+        version: 1,
+        active: true,
+        skill: 'deep-interview',
+        keyword: 'deep interview',
+        phase: 'planning',
+        activated_at: '2026-02-25T00:00:00.000Z',
+        updated_at: '2026-02-25T00:00:00.000Z',
+        source: 'keyword-detector',
+        input_lock: {
+          active: true,
+          scope: 'deep-interview-auto-approval',
+          acquired_at: '2026-02-25T00:00:00.000Z',
+          blocked_inputs: ['yes', 'y', 'proceed', 'continue', 'ok', 'sure', 'go ahead', 'next i should'],
+          message: 'Deep interview is active; auto-approval shortcuts are blocked until the interview finishes.',
+        },
+      }, null, 2));
+
+      const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
+      const notifyHook = new URL('../../../dist/scripts/notify-hook.js', import.meta.url).pathname;
+      const result = spawnSync(
+        process.execPath,
+        [watcherScript, '--once', '--authority-only', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50'],
+        { encoding: 'utf-8', env: buildCleanNotifyEnv() },
+      );
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+
+      const watcherStatePath = join(wd, '.omx', 'state', 'notify-fallback-state.json');
+      const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
+      assert.equal(watcherState.authority_only, true);
+      assert.equal(watcherState.dispatch_drain?.run_count, 1);
+      assert.equal(watcherState.leader_nudge?.run_count, 0);
+      assert.equal(watcherState.fallback_auto_nudge?.last_reason, 'init');
+
+      const logPath = join(wd, '.omx', 'logs', `notify-fallback-${new Date().toISOString().split('T')[0]}.jsonl`);
+      const logContent = await readFile(logPath, 'utf-8').catch(() => '');
+      assert.equal(logContent.trim(), '');
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
 
   it('disables fallback watcher nudges when deep-interview state is active', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-deep-interview-suppressed-'));
