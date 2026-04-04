@@ -894,10 +894,16 @@ process.on('SIGTERM', () => process.exit(0));
       assert.equal(runtime.config.worker_launch_mode, 'prompt');
       assert.equal(runtime.config.workers[0]?.role, 'test-engineer');
       assert.equal(runtime.config.workers[1]?.role, 'writer');
+      assert.equal(runtime.config.next_task_id, 3);
+      assert.deepEqual(runtime.config.workers[0]?.assigned_tasks, ['1']);
+      assert.deepEqual(runtime.config.workers[1]?.assigned_tasks, ['2']);
 
       const config = await readTeamConfig(runtime.teamName, cwd);
+      assert.equal(config?.next_task_id, 3);
       assert.equal(config?.workers[0]?.role, 'test-engineer');
       assert.equal(config?.workers[1]?.role, 'writer');
+      assert.deepEqual(config?.workers[0]?.assigned_tasks, ['1']);
+      assert.deepEqual(config?.workers[1]?.assigned_tasks, ['2']);
 
       const task1 = await readTask(runtime.teamName, '1', cwd);
       const task2 = await readTask(runtime.teamName, '2', cwd);

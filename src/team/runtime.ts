@@ -1667,6 +1667,17 @@ export async function startTeam(
         role: t.role,
       }, leaderCwd);
     }
+    const persistedConfig = await readTeamConfig(sanitized, leaderCwd);
+    if (!persistedConfig) {
+      throw new Error('failed to reload team config after initial task creation');
+    }
+    config = {
+      ...persistedConfig,
+      leader_cwd: leaderCwd,
+      team_state_root: teamStateRoot,
+      workspace_mode: workspaceMode,
+      worktree_mode: effectiveWorktreeMode,
+    };
 
     // 5. Write team-scoped worker instructions file only for single-workspace mode.
     if (workspaceMode !== 'worktree') {
@@ -1883,6 +1894,7 @@ export async function startTeam(
         config.workers[i - 1].pane_id = paneId;
         config.workers[i - 1].role = workerRole;
         config.workers[i - 1].worker_cli = workerCliPlan[i - 1];
+        config.workers[i - 1].assigned_tasks = workerTasks.map(t => t.id);
         config.workers[i - 1].working_dir = workerWorkspace.cwd;
         config.workers[i - 1].worktree_repo_root = workerWorkspace.worktreeRepoRoot;
         config.workers[i - 1].worktree_path = workerWorkspace.worktreePath;
