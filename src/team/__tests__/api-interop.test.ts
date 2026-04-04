@@ -18,6 +18,7 @@ import {
   sendDirectMessage,
   enqueueDispatchRequest,
   readDispatchRequest,
+  listDispatchRequests,
   appendTeamEvent,
   updateWorkerHeartbeat,
   writeMonitorSnapshot,
@@ -184,9 +185,8 @@ describe('executeTeamApiOperation: send-message', () => {
       const messageId = String(message.message_id ?? '');
       assert.ok(messageId, 'message should include a message_id');
 
-      const requests = await readFile(join(cwd, '.omx', 'state', 'team', 'msg-team', 'dispatch', 'requests.json'), 'utf-8');
-      const parsedRequests = JSON.parse(requests) as Array<Record<string, unknown>>;
-      const mailboxRequest = parsedRequests.find((request) => request.kind === 'mailbox' && request.message_id === messageId);
+      const parsedRequests = await listDispatchRequests('msg-team', cwd, { kind: 'mailbox' });
+      const mailboxRequest = parsedRequests.find((request) => request.message_id === messageId);
       assert.ok(mailboxRequest, 'send-message should enqueue a mailbox dispatch request');
       assert.equal(mailboxRequest?.to_worker, 'worker-2');
     } finally {
