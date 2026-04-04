@@ -662,7 +662,7 @@ describe("config generator idempotency (#384)", () => {
 
   it("skips shared MCP entries that already exist in user config", () => {
     const existing = [
-      "[mcp_servers.gitnexus]",
+      "[mcp_servers.existing_server]",
       'command = "custom"',
       'args = ["serve"]',
       "",
@@ -670,8 +670,8 @@ describe("config generator idempotency (#384)", () => {
     const merged = buildMergedConfig(existing, "/tmp/omx", {
       sharedMcpServers: [
         {
-          name: "gitnexus",
-          command: "gitnexus",
+          name: "existing_server",
+          command: "existing-server",
           args: ["mcp"],
           enabled: true,
         },
@@ -685,7 +685,7 @@ describe("config generator idempotency (#384)", () => {
       sharedMcpRegistrySource: "/tmp/.omx/mcp-registry.json",
     });
 
-    assert.equal(count(merged, /^\[mcp_servers\.gitnexus\]$/gm), 1);
+    assert.equal(count(merged, /^\[mcp_servers\.existing_server\]$/gm), 1);
     assert.match(merged, /command = "custom"/);
     assert.equal(count(merged, /^\[mcp_servers\.eslint\]$/gm), 1);
   });

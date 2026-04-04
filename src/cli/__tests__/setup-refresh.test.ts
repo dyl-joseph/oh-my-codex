@@ -346,8 +346,8 @@ describe("omx setup refresh summary and dry-run behavior", () => {
           {
             uiTheme: "dark",
             mcpServers: {
-              gitnexus: {
-                command: "custom-gitnexus",
+              existing_server: {
+                command: "custom-existing-server",
                 args: ["serve"],
                 enabled: true,
               },
@@ -361,7 +361,7 @@ describe("omx setup refresh summary and dry-run behavior", () => {
       await writeFile(
         registryPath,
         JSON.stringify({
-          gitnexus: { command: "gitnexus", args: ["mcp"] },
+          existing_server: { command: "existing-server", args: ["mcp"] },
           eslint: { command: "npx", args: ["@eslint/mcp@latest"], enabled: false },
         }),
       );
@@ -378,8 +378,8 @@ describe("omx setup refresh summary and dry-run behavior", () => {
         mcpServers?: Record<string, { command: string; args: string[]; enabled: boolean }>;
       };
       assert.equal(settings.uiTheme, "dark");
-      assert.deepEqual(settings.mcpServers?.gitnexus, {
-        command: "custom-gitnexus",
+      assert.deepEqual(settings.mcpServers?.existing_server, {
+        command: "custom-existing-server",
         args: ["serve"],
         enabled: true,
       });
@@ -442,15 +442,15 @@ describe("omx setup refresh summary and dry-run behavior", () => {
       await writeFile(
         join(wd, ".omc", "mcp-registry.json"),
         JSON.stringify({
-          gitnexus: { command: "gitnexus", args: ["mcp"] },
+          legacy_helper: { command: "legacy-helper", args: ["mcp"] },
         }),
       );
 
       await runSetupInTempDir(wd, { scope: "project" });
 
       const config = await readFile(join(wd, ".codex", "config.toml"), "utf-8");
-      assert.doesNotMatch(config, /^\[mcp_servers\.gitnexus\]$/m);
-      assert.doesNotMatch(config, /Shared MCP Server: gitnexus/);
+      assert.doesNotMatch(config, /^\[mcp_servers\.legacy_helper\]$/m);
+      assert.doesNotMatch(config, /Shared MCP Server: legacy_helper/);
 
       const output = await runSetupWithCapturedLogs(wd, { scope: "project" });
       assert.match(output, /legacy shared MCP registry detected at .*\.omc\/mcp-registry\.json but ignored by default/i);

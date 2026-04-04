@@ -104,10 +104,11 @@ function normalizeEntry(
 }
 
 export function getUnifiedMcpRegistryCandidates(homeDir = homedir()): string[] {
-  return [
-    join(homeDir, ".omx", "mcp-registry.json"),
-    join(homeDir, ".omc", "mcp-registry.json"),
-  ];
+  return [join(homeDir, ".omx", "mcp-registry.json")];
+}
+
+export function getLegacyUnifiedMcpRegistryCandidate(homeDir = homedir()): string {
+  return join(homeDir, ".omc", "mcp-registry.json");
 }
 
 export async function loadUnifiedMcpRegistry(
