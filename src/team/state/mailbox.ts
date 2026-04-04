@@ -107,8 +107,8 @@ export async function sendDirectMessage(
       const bridgeMessage = bridgeMailbox.messages.find((candidate) => candidate.message_id === msgId);
       if (bridgeMessage) {
         msg = {
-            ...bridgeMessage,
-            body: bridgeMessage.body || body,
+          ...bridgeMessage,
+          body: bridgeMessage.body || body,
         };
         const shadowMailbox = {
           worker: legacyMailbox.worker,

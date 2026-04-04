@@ -446,23 +446,6 @@ function resolveTeamWorkingDirectory(teamName: string, preferredCwd: string): st
   return preferredCwd;
 }
 
-function readLegacyMailboxMessage(
-  teamName: string,
-  workerName: string,
-  messageId: string,
-  cwd: string,
-): Record<string, unknown> | null {
-  const mailboxPath = join(cwd, '.omx', 'state', 'team', teamName, 'mailbox', `${workerName}.json`);
-  if (!existsSync(mailboxPath)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(mailboxPath, 'utf8')) as { messages?: Array<Record<string, unknown>> };
-    const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
-    return messages.find((message) => String(message.message_id || '') === messageId) ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function readLegacyMailboxMessages(
   teamName: string,
   workerName: string,
@@ -476,6 +459,16 @@ function readLegacyMailboxMessages(
   } catch {
     return [];
   }
+}
+
+function readLegacyMailboxMessage(
+  teamName: string,
+  workerName: string,
+  messageId: string,
+  cwd: string,
+): Record<string, unknown> | null {
+  return readLegacyMailboxMessages(teamName, workerName, cwd)
+    .find((message) => String(message.message_id || '') === messageId) ?? null;
 }
 
 function normalizeTeamName(toolOrOperationName: string): string {
