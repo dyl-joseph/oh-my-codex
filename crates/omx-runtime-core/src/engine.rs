@@ -389,14 +389,12 @@ fn replay_event(engine: &mut RuntimeEngine, event: &RuntimeEvent) {
             to_worker,
             body,
         } => {
-            engine
-                .mailbox
-                .create(
-                    message_id,
-                    from_worker,
-                    to_worker,
-                    body.as_deref().unwrap_or(""),
-                );
+            engine.mailbox.create(
+                message_id,
+                from_worker,
+                to_worker,
+                body.as_deref().unwrap_or(""),
+            );
         }
         RuntimeEvent::MailboxNotified { message_id } => {
             let _ = engine.mailbox.mark_notified(message_id);
