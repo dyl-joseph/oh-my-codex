@@ -70,9 +70,11 @@ export async function sendDirectMessage(
 
   await deps.withMailboxLock(deps.teamName, toWorker, deps.cwd, async () => {
     const mailbox = await deps.readMailbox(deps.teamName, toWorker, deps.cwd);
+    const legacyMailbox = deps.readLegacyMailbox
+      ? await deps.readLegacyMailbox(deps.teamName, toWorker, deps.cwd)
+      : mailbox;
     const dedupeCandidates = [...mailbox.messages];
     if (deps.readLegacyMailbox) {
-      const legacyMailbox = await deps.readLegacyMailbox(deps.teamName, toWorker, deps.cwd);
       const seenMessageIds = new Set(dedupeCandidates.map((candidate) => candidate.message_id));
       for (const legacyMessage of legacyMailbox.messages) {
         if (!seenMessageIds.has(legacyMessage.message_id)) {
@@ -105,13 +107,17 @@ export async function sendDirectMessage(
       const bridgeMessage = bridgeMailbox.messages.find((candidate) => candidate.message_id === msgId);
       if (bridgeMessage) {
         msg = {
-          ...bridgeMessage,
-          body: bridgeMessage.body || body,
+            ...bridgeMessage,
+            body: bridgeMessage.body || body,
         };
-        const shadowIndex = mailbox.messages.findIndex((candidate) => candidate.message_id === msgId);
-        if (shadowIndex >= 0) mailbox.messages[shadowIndex] = msg;
-        else mailbox.messages.push(msg);
-        await deps.writeMailbox(deps.teamName, mailbox, deps.cwd);
+        const shadowMailbox = {
+          worker: legacyMailbox.worker,
+          messages: [...legacyMailbox.messages],
+        };
+        const shadowIndex = shadowMailbox.messages.findIndex((candidate) => candidate.message_id === msgId);
+        if (shadowIndex >= 0) shadowMailbox.messages[shadowIndex] = msg;
+        else shadowMailbox.messages.push(msg);
+        await deps.writeMailbox(deps.teamName, shadowMailbox, deps.cwd);
         created = true;
         return;
       }
@@ -124,8 +130,11 @@ export async function sendDirectMessage(
       body,
       created_at: new Date().toISOString(),
     };
-    mailbox.messages.push(msg);
-    await deps.writeMailbox(deps.teamName, mailbox, deps.cwd);
+    const shadowMailbox = {
+      worker: legacyMailbox.worker,
+      messages: [...legacyMailbox.messages, msg],
+    };
+    await deps.writeMailbox(deps.teamName, shadowMailbox, deps.cwd);
     created = true;
   });
 

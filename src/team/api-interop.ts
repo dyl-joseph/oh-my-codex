@@ -446,6 +446,38 @@ function resolveTeamWorkingDirectory(teamName: string, preferredCwd: string): st
   return preferredCwd;
 }
 
+function readLegacyMailboxMessage(
+  teamName: string,
+  workerName: string,
+  messageId: string,
+  cwd: string,
+): Record<string, unknown> | null {
+  const mailboxPath = join(cwd, '.omx', 'state', 'team', teamName, 'mailbox', `${workerName}.json`);
+  if (!existsSync(mailboxPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(mailboxPath, 'utf8')) as { messages?: Array<Record<string, unknown>> };
+    const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+    return messages.find((message) => String(message.message_id || '') === messageId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readLegacyMailboxMessages(
+  teamName: string,
+  workerName: string,
+  cwd: string,
+): Array<Record<string, unknown>> {
+  const mailboxPath = join(cwd, '.omx', 'state', 'team', teamName, 'mailbox', `${workerName}.json`);
+  if (!existsSync(mailboxPath)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(mailboxPath, 'utf8')) as { messages?: Array<Record<string, unknown>> };
+    return Array.isArray(parsed.messages) ? parsed.messages : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeTeamName(toolOrOperationName: string): string {
   const normalized = toolOrOperationName.trim().toLowerCase();
   const withoutPrefix = normalized.startsWith('team_') ? normalized.slice('team_'.length) : normalized;
@@ -556,12 +588,23 @@ export async function executeTeamApiOperation(
             && message.from_worker === fromWorker
             && message.to_worker === toWorker,
           );
-        if (!matching) {
+        const legacyMatching = !matching && outcome.message_id
+          ? readLegacyMailboxMessage(teamName, toWorker, outcome.message_id, cwd)
+          : null;
+        const legacySenderFallback = !matching && !legacyMatching
+          ? [...readLegacyMailboxMessages(teamName, toWorker, cwd)].reverse().find((message) =>
+            !beforeIds.has(String(message.message_id || ''))
+            && String(message.from_worker || '') === fromWorker
+            && String(message.to_worker || '') === toWorker,
+          ) ?? null
+          : null;
+        const persisted = matching ?? legacyMatching ?? legacySenderFallback;
+        if (!persisted) {
           throw new Error(`send-message could not locate persisted mailbox message for ${fromWorker} -> ${toWorker}`);
         }
-        const message = matching.body || !body
-          ? matching
-          : { ...matching, body };
+        const message = persisted.body || !body
+          ? persisted
+          : { ...persisted, body };
         return { ok: true, operation, data: { message, dispatch: outcome } };
       }
       case 'broadcast': {
