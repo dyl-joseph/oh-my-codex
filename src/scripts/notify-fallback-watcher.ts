@@ -1315,13 +1315,17 @@ async function runDispatchDrainTick(): Promise<void> {
   }
 }
 
-async function pumpTeamControlPlaneTick(): Promise<void> {
-  await runDispatchDrainTick();
+async function shouldSuppressInteractiveFallbackTicks(): Promise<boolean> {
   const [deepInterviewStateActive, deepInterviewInputLockActive] = await Promise.all([
     isDeepInterviewStateActive(stateDir),
     isDeepInterviewInputLockActive(stateDir),
   ]);
-  if (deepInterviewStateActive || deepInterviewInputLockActive) return;
+  return deepInterviewStateActive || deepInterviewInputLockActive;
+}
+
+async function pumpTeamControlPlaneTick(): Promise<void> {
+  await runDispatchDrainTick();
+  if (await shouldSuppressInteractiveFallbackTicks()) return;
   await runLeaderNudgeTick();
   await runFallbackAutoNudgeTick();
 }
@@ -1333,11 +1337,7 @@ async function runWatcherCycle(): Promise<void> {
     await pollFiles();
   }
   await pumpTeamControlPlaneTick();
-  const [deepInterviewStateActive, deepInterviewInputLockActive] = await Promise.all([
-    isDeepInterviewStateActive(stateDir),
-    isDeepInterviewInputLockActive(stateDir),
-  ]);
-  if (!authorityOnly && !deepInterviewStateActive && !deepInterviewInputLockActive) {
+  if (!authorityOnly && !(await shouldSuppressInteractiveFallbackTicks())) {
     await runRalphWatcherBehaviorTick();
   }
   await writeState();
