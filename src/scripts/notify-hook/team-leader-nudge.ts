@@ -772,6 +772,8 @@ export async function maybeNudgeTeamLeader({
 
     const paneGuard = await evaluatePaneInjectionReadiness(tmuxTarget, {
       skipIfScrolling: true,
+      // Leader nudges should still queue into a live Codex pane even while the
+      // agent is busy; shell/copy-mode guards stay enforced.
       requireRunningAgent: true,
       requireReady: false,
       requireIdle: false,
