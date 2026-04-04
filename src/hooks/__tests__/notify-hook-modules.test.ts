@@ -380,8 +380,8 @@ describe('notify-hook/auto-nudge – blocked deep-interview auto approvals', () 
 
   it('normalizes custom blocked inputs before exact and prefix matching', async () => {
     const { isBlockedAutoApprovalInput } = await loadModule('notify-hook/auto-nudge.js');
-    assert.equal(isBlockedAutoApprovalInput('GO ahead!!!', [' go ahead ']), true);
-    assert.equal(isBlockedAutoApprovalInput('Next I should update the focused tests.', [' Next I Should ']), true);
+    assert.equal(isBlockedAutoApprovalInput(' proceed! ', ['PROCEED']), true);
+    assert.equal(isBlockedAutoApprovalInput('Next I should inspect the logs.', [' next   i should ']), true);
   });
 
   it('does not block unrelated responses', async () => {
