@@ -592,15 +592,17 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("mailbox.json"),
-            serde_json::to_string_pretty(&MailboxLog::from(vec![crate::mailbox::MailboxRecord {
-                message_id: "msg-legacy".into(),
-                from_worker: "worker-1".into(),
-                to_worker: "leader-fixed".into(),
-                body: "recovered body".into(),
-                created_at: "2026-04-04T00:00:00.000Z".into(),
-                notified_at: None,
-                delivered_at: None,
-            }]))
+            serde_json::to_string_pretty(&serde_json::json!({
+                "records": [{
+                    "message_id": "msg-legacy",
+                    "from_worker": "worker-1",
+                    "to_worker": "leader-fixed",
+                    "body": "recovered body",
+                    "created_at": "2026-04-04T00:00:00.000Z",
+                    "notified_at": null,
+                    "delivered_at": null
+                }]
+            }))
             .unwrap(),
         )
         .unwrap();
