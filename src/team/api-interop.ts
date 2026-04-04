@@ -14,6 +14,7 @@ import {
 } from './contracts.js';
 import { readTeamEvents, waitForTeamEvent } from './state/events.js';
 import { queueDirectMailboxMessage } from './mcp-comm.js';
+import { resolveCanonicalTeamStateRoot } from './state-root.js';
 import { generateLeaderMailboxTriggerMessage, generateMailboxTriggerMessage } from './worker-bootstrap.js';
 import {
   teamBroadcast as broadcastMessage,
@@ -451,7 +452,7 @@ function readLegacyMailboxMessages(
   workerName: string,
   cwd: string,
 ): Array<Record<string, unknown>> {
-  const mailboxPath = join(cwd, '.omx', 'state', 'team', teamName, 'mailbox', `${workerName}.json`);
+  const mailboxPath = join(resolveCanonicalTeamStateRoot(cwd), 'team', teamName, 'mailbox', `${workerName}.json`);
   if (!existsSync(mailboxPath)) return [];
   try {
     const parsed = JSON.parse(readFileSync(mailboxPath, 'utf8')) as { messages?: Array<Record<string, unknown>> };
