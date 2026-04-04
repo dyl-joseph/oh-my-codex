@@ -21,6 +21,7 @@ interface MailboxDeps {
   cwd: string;
   withMailboxLock: <T>(teamName: string, workerName: string, cwd: string, fn: () => Promise<T>) => Promise<T>;
   readMailbox: (teamName: string, workerName: string, cwd: string) => Promise<TeamMailbox>;
+  readLegacyMailbox?: (teamName: string, workerName: string, cwd: string) => Promise<TeamMailbox>;
   writeMailbox: (teamName: string, mailbox: TeamMailbox, cwd: string) => Promise<void>;
   appendTeamEvent: (
     teamName: string,
@@ -69,7 +70,19 @@ export async function sendDirectMessage(
 
   await deps.withMailboxLock(deps.teamName, toWorker, deps.cwd, async () => {
     const mailbox = await deps.readMailbox(deps.teamName, toWorker, deps.cwd);
-    const existing = mailbox.messages.find((candidate) =>
+    const dedupeCandidates = [...mailbox.messages];
+    if (deps.readLegacyMailbox) {
+      const legacyMailbox = await deps.readLegacyMailbox(deps.teamName, toWorker, deps.cwd);
+      const seenMessageIds = new Set(dedupeCandidates.map((candidate) => candidate.message_id));
+      for (const legacyMessage of legacyMailbox.messages) {
+        if (!seenMessageIds.has(legacyMessage.message_id)) {
+          dedupeCandidates.push(legacyMessage);
+          seenMessageIds.add(legacyMessage.message_id);
+        }
+      }
+    }
+
+    const existing = dedupeCandidates.find((candidate) =>
       candidate.from_worker === fromWorker
       && candidate.to_worker === toWorker
       && candidate.body === body

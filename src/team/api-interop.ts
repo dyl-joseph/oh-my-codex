@@ -533,10 +533,7 @@ export async function executeTeamApiOperation(
         const beforeIds = new Set(beforeMessages.map((message) => message.message_id));
 
         const outcome = hasLiveTmuxTarget
-          ? (await (async () => {
-            await sendWorkerMessage(teamName, fromWorker, toWorker, body, cwd);
-            return { ok: true, transport: 'hook', reason: 'api_send_message_via_runtime', message_id: '' };
-          })())
+          ? await sendWorkerMessage(teamName, fromWorker, toWorker, body, cwd)
           : await queueDirectMailboxMessage({
             teamName,
             fromWorker,
@@ -554,11 +551,18 @@ export async function executeTeamApiOperation(
         const messages = await listMailboxMessages(teamName, toWorker, cwd);
         const matching = outcome.message_id
           ? messages.find((message) => message.message_id === outcome.message_id)
-          : [...messages].reverse().find((message) => !beforeIds.has(message.message_id) && message.from_worker === fromWorker && message.body === body);
+          : [...messages].reverse().find((message) =>
+            !beforeIds.has(message.message_id)
+            && message.from_worker === fromWorker
+            && message.to_worker === toWorker,
+          );
         if (!matching) {
           throw new Error(`send-message could not locate persisted mailbox message for ${fromWorker} -> ${toWorker}`);
         }
-        return { ok: true, operation, data: { message: matching, dispatch: outcome } };
+        const message = matching.body || !body
+          ? matching
+          : { ...matching, body };
+        return { ok: true, operation, data: { message, dispatch: outcome } };
       }
       case 'broadcast': {
         const teamName = String(args.team_name || '').trim();

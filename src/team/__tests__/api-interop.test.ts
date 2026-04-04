@@ -204,6 +204,13 @@ describe('executeTeamApiOperation: send-message', () => {
     try {
       await initTeamState(teamName, 'leader mailbox dedupe', 'executor', 2, repoCwd);
 
+      const configPath = join(repoCwd, '.omx', 'state', 'team', teamName, 'config.json');
+      const config = JSON.parse(await readFile(configPath, 'utf-8')) as {
+        leader_pane_id?: string;
+      };
+      config.leader_pane_id = '%55';
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
       const manifestPath = join(repoCwd, '.omx', 'state', 'team', teamName, 'manifest.v2.json');
       const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as {
         leader_pane_id?: string;
@@ -241,7 +248,10 @@ describe('executeTeamApiOperation: send-message', () => {
         join(repoCwd, '.omx', 'state', 'team', teamName, 'mailbox', 'leader-fixed.json'),
         'utf-8',
       )) as { messages?: Array<Record<string, unknown>> };
-      assert.equal(mailbox.messages?.length, 1, 'deduped leader sends should not append duplicate mailbox rows');
+      const workerMessages = (mailbox.messages ?? []).filter((message) =>
+        message.from_worker === 'worker-1' && message.to_worker === 'leader-fixed',
+      );
+      assert.equal(workerMessages.length, 1, 'deduped leader sends should not append duplicate worker mailbox rows');
     } finally {
       if (typeof prevTeamStateRoot === 'string') process.env.OMX_TEAM_STATE_ROOT = prevTeamStateRoot;
       else delete process.env.OMX_TEAM_STATE_ROOT;
