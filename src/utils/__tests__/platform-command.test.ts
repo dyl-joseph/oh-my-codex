@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   buildPlatformCommandSpec,
@@ -193,6 +193,32 @@ describe('resolveCommandPathForPlatform', () => {
     }
   });
 
+  it('skips directory candidates when resolving commands on Windows', async () => {
+    const fakeRoot = await mkdtemp(join(tmpdir(), 'omx-platform-path-dir-'));
+    const systemDir = join(fakeRoot, 'system32');
+    const legacyDir = join(fakeRoot, 'WindowsPowerShell', 'v1.0');
+    try {
+      const legacyExePath = join(legacyDir, 'powershell.exe');
+      await mkdir(join(systemDir, 'powershell'), { recursive: true });
+      await mkdir(legacyDir, { recursive: true });
+      await writeFile(legacyExePath, '');
+
+      assert.equal(
+        resolveCommandPathForPlatform(
+          'powershell',
+          'win32',
+          {
+            PATH: [systemDir, legacyDir].join(delimiter),
+            PATHEXT: '.EXE;.CMD;.PS1',
+          },
+        ),
+        legacyExePath,
+      );
+    } finally {
+      await rm(fakeRoot, { recursive: true, force: true });
+    }
+  });
+
   it('resolves PATH entries to absolute paths on POSIX', async () => {
     const fakeBin = await mkdtemp(join(tmpdir(), 'omx-platform-posix-'));
     try {
@@ -238,6 +264,53 @@ describe('classifySpawnError', () => {
 });
 
 describe('spawnPlatformCommandSync', () => {
+  it('does not pass a directory candidate to Windows spawn resolution', async () => {
+    const fakeRoot = await mkdtemp(join(tmpdir(), 'omx-platform-spawn-dir-'));
+    const systemDir = join(fakeRoot, 'system32');
+    const legacyDir = join(fakeRoot, 'WindowsPowerShell', 'v1.0');
+    try {
+      const legacyExePath = join(legacyDir, 'powershell.exe');
+      await mkdir(join(systemDir, 'powershell'), { recursive: true });
+      await mkdir(legacyDir, { recursive: true });
+      await writeFile(legacyExePath, '');
+
+      const calls: Array<{
+        command: string;
+        args: readonly string[];
+      }> = [];
+
+      const probed = spawnPlatformCommandSync(
+        'powershell',
+        ['-NoLogo', '-Command', 'Write-Output ok'],
+        { encoding: 'utf-8' },
+        'win32',
+        {
+          PATH: [systemDir, legacyDir].join(delimiter),
+          PATHEXT: '.EXE;.CMD;.PS1',
+        },
+        undefined,
+        (((command: string, args: readonly string[]) => {
+          calls.push({ command, args });
+          return {
+            status: 0,
+            stdout: 'ok',
+            stderr: '',
+            pid: 1,
+            output: [],
+            signal: null,
+          };
+        }) as unknown) as typeof import('child_process').spawnSync,
+      );
+
+      assert.equal(probed.spec.command, legacyExePath);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0]?.command, legacyExePath);
+      assert.deepEqual(calls[0]?.args, ['-NoLogo', '-Command', 'Write-Output ok']);
+    } finally {
+      await rm(fakeRoot, { recursive: true, force: true });
+    }
+  });
+
   it('passes the Windows-resolved spec into the spawn implementation', async () => {
     const fakeBin = await mkdtemp(join(tmpdir(), 'omx-platform-spawn-'));
     try {
