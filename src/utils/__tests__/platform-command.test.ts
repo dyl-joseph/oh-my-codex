@@ -169,6 +169,38 @@ describe('buildPlatformCommandSpec', () => {
       await rm(fakeBin, { recursive: true, force: true });
     }
   });
+
+  it('falls back to powershell.exe when PATH only contains a powershell directory', async () => {
+    const fakeBin = await mkdtemp(join(tmpdir(), 'omx-platform-ps1-dir-'));
+    try {
+      const ps1Path = join(fakeBin, 'codex.ps1');
+      await writeFile(ps1Path, '');
+      await mkdir(join(fakeBin, 'powershell'));
+      const spec = buildPlatformCommandSpec(
+        'codex',
+        ['--version'],
+        'win32',
+        {
+          PATH: fakeBin,
+          PATHEXT: '.EXE;.CMD;.PS1',
+        },
+      );
+
+      assert.equal(spec.command, 'powershell.exe');
+      assert.deepEqual(spec.args, [
+        '-NoLogo',
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        ps1Path,
+        '--version',
+      ]);
+      assert.equal(spec.resolvedPath, ps1Path);
+    } finally {
+      await rm(fakeBin, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('resolveCommandPathForPlatform', () => {
@@ -187,6 +219,26 @@ describe('resolveCommandPathForPlatform', () => {
           },
         ),
         exePath,
+      );
+    } finally {
+      await rm(fakeBin, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores directory matches when resolving Windows commands', async () => {
+    const fakeBin = await mkdtemp(join(tmpdir(), 'omx-platform-dir-match-'));
+    try {
+      await mkdir(join(fakeBin, 'powershell'));
+      assert.equal(
+        resolveCommandPathForPlatform(
+          'powershell',
+          'win32',
+          {
+            PATH: fakeBin,
+            PATHEXT: '.EXE;.CMD;.PS1',
+          },
+        ),
+        null,
       );
     } finally {
       await rm(fakeBin, { recursive: true, force: true });
