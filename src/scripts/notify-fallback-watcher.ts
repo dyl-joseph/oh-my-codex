@@ -25,6 +25,7 @@ import {
 import { DEFAULT_MARKER } from './tmux-hook-engine.js';
 import { isTerminalPhase } from './notify-hook/utils.js';
 import { isSessionStale, readSessionState } from '../hooks/session.js';
+import { resolveFallbackWatcherStateDir } from '../team/fallback-watcher.js';
 
 function argValue(name: string, fallback = ''): string {
   const idx = process.argv.indexOf(name);
@@ -98,7 +99,7 @@ const maxLifetimeMs = runOnce
 
 const omxDir = join(cwd, '.omx');
 const logsDir = join(omxDir, 'logs');
-const stateDir = join(omxDir, 'state');
+const stateDir = resolveFallbackWatcherStateDir(cwd, process.env);
 const statePath = join(stateDir, 'notify-fallback-state.json');
 const pidFilePath = resolve(argValue('--pid-file', join(stateDir, 'notify-fallback.pid')));
 const logPath = join(logsDir, `notify-fallback-${new Date().toISOString().split('T')[0]}.jsonl`);

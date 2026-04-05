@@ -119,6 +119,7 @@ import {
   type TeamCommitHygieneArtifactPaths,
   type TeamOperationalCommitEntry,
 } from './commit-hygiene.js';
+import { startWorkerFallbackWatcher } from './fallback-watcher.js';
 import {
   assertCleanLeaderWorkspaceForWorkerWorktrees,
   ensureWorktree,
@@ -1899,6 +1900,24 @@ export async function startTeam(
         const ready = waitForWorkerReady(sessionName, i, workerReadyTimeoutMs, paneId);
         if (!ready) {
           throw new Error(`Worker ${workerName} did not become ready in tmux session ${sessionName}`);
+        }
+      }
+
+      if (workerCliPlan[i - 1] === 'codex') {
+        try {
+          startWorkerFallbackWatcher({
+            teamName: sanitized,
+            workerName,
+            cwd: workerWorkspace.cwd,
+            parentPid: identity.pid ?? 0,
+            env: { ...process.env, ...(workerStartups[i - 1]?.env ?? {}) },
+          });
+        } catch (error) {
+          console.warn(
+            `[omx:team] warning: failed to start worker fallback watcher for ${workerName}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         }
       }
 
