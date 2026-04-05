@@ -11,7 +11,13 @@ import { readJsonIfExists, getScopedStateDirsForCurrentSession } from './state-i
 import { runProcess } from './process-runner.js';
 import { logTmuxHookEvent } from './log.js';
 import { evaluatePaneInjectionReadiness, sendPaneInput } from './team-tmux-guard.js';
-import { DEFAULT_MARKER } from '../tmux-hook-engine.js';
+import { resolvePaneTarget } from './tmux-injection.js';
+import {
+  buildCapturePaneArgv,
+  DEFAULT_MARKER,
+  normalizeTmuxCapture,
+  paneHasActiveTask,
+} from '../tmux-hook-engine.js';
 import { isLeaderRuntimeStale } from '../../team/leader-activity.js';
 const LEADER_PANE_MISSING_NO_INJECTION_REASON = 'leader_pane_missing_no_injection';
 const LEADER_PANE_SHELL_NO_INJECTION_REASON = 'leader_pane_shell_no_injection';
@@ -74,6 +80,114 @@ function buildMailboxCheckReminder(teamName) {
 
 function buildWorkerStartEvidenceReminder(teamName, workerName) {
   return `Next: check ${workerName} msg/output, confirm task in omx team status ${teamName}, then reassign/nudge.`;
+}
+
+function capturedPaneContainsTrigger(captured, trigger) {
+  if (!captured || !trigger) return false;
+  return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(trigger));
+}
+
+function capturedPaneContainsTriggerNearTail(captured, trigger, nonEmptyTailLines = 24) {
+  if (!captured || !trigger) return false;
+  const normalizedTrigger = normalizeTmuxCapture(trigger);
+  if (!normalizedTrigger) return false;
+  const lines = safeString(captured)
+    .split('\n')
+    .map((line) => line.replace(/\r/g, '').trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return false;
+  const tail = lines.slice(-Math.max(1, nonEmptyTailLines)).join(' ');
+  return normalizeTmuxCapture(tail).includes(normalizedTrigger);
+}
+
+async function resolveCanonicalLeaderPaneTarget(leaderPaneId) {
+  const normalizedLeaderPaneId = safeString(leaderPaneId).trim();
+  if (!normalizedLeaderPaneId) return { paneTarget: '', reason: 'missing_pane_target' };
+  const resolved = await resolvePaneTarget({ type: 'pane', value: normalizedLeaderPaneId }, '', '', '', {}).catch(() => null);
+  const paneTarget = safeString(resolved?.paneTarget).trim();
+  if (paneTarget) return { paneTarget, reason: safeString(resolved?.reason).trim() || 'ok' };
+  return { paneTarget: normalizedLeaderPaneId, reason: safeString(resolved?.reason).trim() || 'configured_pane_target' };
+}
+
+async function sendVerifiedLeaderNudge({ leaderPaneId, prompt }) {
+  const resolution = await resolveCanonicalLeaderPaneTarget(leaderPaneId);
+  if (!resolution.paneTarget) {
+    return { ok: false, reason: resolution.reason, paneTarget: '', paneCurrentCommand: '' };
+  }
+
+  const paneGuard = await evaluatePaneInjectionReadiness(resolution.paneTarget, {
+    skipIfScrolling: true,
+    requireRunningAgent: true,
+    requireReady: false,
+    requireIdle: false,
+  });
+  if (!paneGuard.ok) {
+    return {
+      ok: false,
+      reason: paneGuard.reason,
+      paneTarget: resolution.paneTarget,
+      paneCurrentCommand: paneGuard.paneCurrentCommand || '',
+    };
+  }
+
+  const sendResult = await sendPaneInput({
+    paneTarget: resolution.paneTarget,
+    prompt,
+    submitKeyPresses: 2,
+    submitDelayMs: 100,
+  });
+  if (!sendResult.ok) {
+    return {
+      ok: false,
+      reason: sendResult.error || sendResult.reason,
+      paneTarget: resolution.paneTarget,
+      paneCurrentCommand: paneGuard.paneCurrentCommand || '',
+    };
+  }
+
+  const verifyNarrowArgv = buildCapturePaneArgv(resolution.paneTarget, 8);
+  const verifyWideArgv = buildCapturePaneArgv(resolution.paneTarget);
+  for (let round = 0; round < 3; round++) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+    try {
+      const narrowCap = await runProcess('tmux', verifyNarrowArgv, 2000);
+      const wideCap = await runProcess('tmux', verifyWideArgv, 2000);
+      if (paneHasActiveTask(wideCap.stdout)) {
+        return {
+          ok: true,
+          reason: 'tmux_send_keys_confirmed_active_task',
+          paneTarget: resolution.paneTarget,
+          paneCurrentCommand: paneGuard.paneCurrentCommand || '',
+        };
+      }
+      const triggerInNarrow = capturedPaneContainsTrigger(narrowCap.stdout, prompt);
+      const triggerNearTail = capturedPaneContainsTriggerNearTail(wideCap.stdout, prompt);
+      if (!triggerInNarrow && !triggerNearTail) {
+        return {
+          ok: true,
+          reason: 'tmux_send_keys_confirmed',
+          paneTarget: resolution.paneTarget,
+          paneCurrentCommand: paneGuard.paneCurrentCommand || '',
+        };
+      }
+    } catch {
+      // fall through to retry isolated submit
+    }
+    await sendPaneInput({
+      paneTarget: resolution.paneTarget,
+      prompt,
+      submitKeyPresses: 2,
+      typePrompt: false,
+      submitDelayMs: 100,
+    }).catch(() => {});
+  }
+
+  return {
+    ok: false,
+    reason: 'tmux_send_keys_unconfirmed',
+    paneTarget: resolution.paneTarget,
+    paneCurrentCommand: paneGuard.paneCurrentCommand || '',
+  };
 }
 
 function classifyLeaderActionState({
@@ -606,9 +720,8 @@ export async function maybeNudgeTeamLeader({
     const workerPaneIds = Array.isArray(workers)
       ? workers.map((w) => safeString(w && w.pane_id ? w.pane_id : '')).filter(Boolean)
       : [];
-    const canonicalLeaderPaneId = safeString(leaderPaneId).trim();
-    if (!tmuxSession && !canonicalLeaderPaneId) continue;
-    const tmuxTarget = canonicalLeaderPaneId;
+    const configuredLeaderPaneId = safeString(leaderPaneId).trim();
+    if (!tmuxSession && !configuredLeaderPaneId) continue;
     const paneStatus = tmuxSession
       ? await checkWorkerPanesAlive(tmuxSession, workerPaneIds)
       : { alive: false, paneCount: 0 };
@@ -743,7 +856,7 @@ export async function maybeNudgeTeamLeader({
     const capped = text.length > 180 ? `${text.slice(0, 177)}...` : text;
     const markedText = `${capped} ${DEFAULT_MARKER}`;
 
-    if (!tmuxTarget) {
+    if (!configuredLeaderPaneId) {
       nudgeState.last_nudged_by_team[teamName] = { at: nowIso, last_message_id: newestId || prevMsgId || '', reason: nudgeReason };
       if (shouldSendAllIdleNudge) {
         nudgeState.last_idle_nudged_by_team[teamName] = { at: nowIso, worker_count: workerNames.length };
@@ -770,18 +883,22 @@ export async function maybeNudgeTeamLeader({
       continue;
     }
 
-    const paneGuard = await evaluatePaneInjectionReadiness(tmuxTarget, {
-      skipIfScrolling: true,
-      // Leader nudges should still queue into a live Codex pane even while the
-      // agent is busy; shell/copy-mode guards stay enforced.
-      requireRunningAgent: true,
-      requireReady: false,
-      requireIdle: false,
+    const delivery = await sendVerifiedLeaderNudge({
+      leaderPaneId: configuredLeaderPaneId,
+      prompt: markedText,
     });
-    if (!paneGuard.ok) {
-      const deferredReason = paneGuard.reason === 'pane_running_shell'
+    if (!delivery.ok && (
+      delivery.reason === 'missing_pane_target'
+      || delivery.reason === 'target_not_found'
+      || delivery.reason === 'pane_running_shell'
+      || delivery.reason === 'scroll_active'
+      || delivery.reason === 'pane_not_ready'
+    )) {
+      const deferredReason = delivery.reason === 'pane_running_shell'
         ? LEADER_PANE_SHELL_NO_INJECTION_REASON
-        : paneGuard.reason;
+        : (delivery.reason === 'missing_pane_target' || delivery.reason === 'target_not_found')
+          ? LEADER_PANE_MISSING_NO_INJECTION_REASON
+          : delivery.reason;
       nudgeState.last_nudged_by_team[teamName] = { at: nowIso, last_message_id: newestId || prevMsgId || '', reason: nudgeReason };
       if (shouldSendAllIdleNudge) {
         nudgeState.last_idle_nudged_by_team[teamName] = { at: nowIso, worker_count: workerNames.length };
@@ -789,7 +906,7 @@ export async function maybeNudgeTeamLeader({
       await emitLeaderNudgeDeferredEvent(cwd, teamName, deferredReason, nowIso, {
         tmuxSession,
         leaderPaneId,
-        paneCurrentCommand: paneGuard.paneCurrentCommand,
+        paneCurrentCommand: delivery.paneCurrentCommand,
         sourceType: 'leader_nudge',
       });
       try {
@@ -803,8 +920,8 @@ export async function maybeNudgeTeamLeader({
           leader_pane_id: leaderPaneId || null,
           tmux_session: tmuxSession || null,
           tmux_injection_attempted: false,
-          pane_current_command: paneGuard.paneCurrentCommand || null,
-          injection_skip_reason: paneGuard.reason,
+          pane_current_command: delivery.paneCurrentCommand || null,
+          injection_skip_reason: delivery.reason,
           source_type: 'leader_nudge',
         });
       } catch { /* ignore */ }
@@ -812,14 +929,8 @@ export async function maybeNudgeTeamLeader({
     }
 
     try {
-      const sendResult = await sendPaneInput({
-        paneTarget: tmuxTarget,
-        prompt: markedText,
-        submitKeyPresses: 2,
-        submitDelayMs: 100,
-      });
-      if (!sendResult.ok) {
-        throw new Error(sendResult.error || sendResult.reason);
+      if (!delivery.ok) {
+        throw new Error(delivery.reason);
       }
       nudgeState.last_nudged_by_team[teamName] = { at: nowIso, last_message_id: newestId || prevMsgId || '', reason: nudgeReason };
       if (shouldSendAllIdleNudge) {
@@ -833,7 +944,7 @@ export async function maybeNudgeTeamLeader({
           timestamp: nowIso,
           type: 'team_leader_nudge',
           team: teamName,
-          tmux_target: tmuxTarget,
+          tmux_target: delivery.paneTarget || configuredLeaderPaneId,
           reason: nudgeReason,
           pane_count: paneStatus.paneCount,
           leader_stale: leaderStale,
@@ -848,7 +959,7 @@ export async function maybeNudgeTeamLeader({
           timestamp: nowIso,
           type: 'team_leader_nudge',
           team: teamName,
-          tmux_target: tmuxTarget,
+          tmux_target: delivery.paneTarget || configuredLeaderPaneId,
           reason: nudgeReason,
           error: safeString(err && err.message ? err.message : err),
         });

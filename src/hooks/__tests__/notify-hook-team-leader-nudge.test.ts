@@ -2368,6 +2368,234 @@ exit 0
     });
   });
 
+  it('prefers the canonical codex pane over a stale HUD leader pane id', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'gamma-stale-hud-pane';
+      const teamDir = join(stateDir, 'team', teamName);
+      const mailboxDir = join(teamDir, 'mailbox');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(mailboxDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'omx-team-gamma',
+        leader_pane_id: '%91',
+      });
+      await writeJson(join(mailboxDir, 'leader-fixed.json'), {
+        worker: 'leader-fixed',
+        messages: [
+          {
+            message_id: 'msg-stale-hud',
+            from_worker: 'worker-1',
+            to_worker: 'leader-fixed',
+            body: 'Need leader review',
+            created_at: '2026-02-14T00:00:00.000Z',
+          },
+        ],
+      });
+
+      const fakeTmux = `#!/usr/bin/env bash
+set -eu
+echo "$@" >> "${tmuxLogPath}"
+cmd="$1"
+shift || true
+if [[ "$cmd" == "capture-pane" ]]; then
+  printf "OpenAI Codex\\n› ready\\n"
+  exit 0
+fi
+if [[ "$cmd" == "display-message" ]]; then
+  target=""
+  format=""
+  while (($#)); do
+    case "$1" in
+      -p) shift ;;
+      -t) target="$2"; shift 2 ;;
+      *) format="$1"; shift ;;
+    esac
+  done
+  if [[ "$format" == "#{pane_in_mode}" ]]; then
+    echo "0"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_id}" ]]; then
+    echo "\${target:-%42}"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_path}" ]]; then
+    dirname "${tmuxLogPath}"
+    exit 0
+  fi
+  if [[ "$format" == "#S" ]]; then
+    echo "devsess"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_start_command}" && "$target" == "%91" ]]; then
+    echo "node dist/cli/omx.js hud --watch"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_start_command}" && "$target" == "%42" ]]; then
+    echo "codex"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_command}" && "$target" == "%42" ]]; then
+    echo "codex"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_command}" && "$target" == "%91" ]]; then
+    echo "node"
+    exit 0
+  fi
+  exit 0
+fi
+if [[ "$cmd" == "send-keys" ]]; then
+  exit 0
+fi
+if [[ "$cmd" == "list-panes" ]]; then
+  printf "%%42\\t1\\tnode\\tcodex\\n%%91\\t0\\tnode\\tnode dist/cli/omx.js hud --watch\\n"
+  exit 0
+fi
+exit 0
+`;
+      await writeFile(fakeTmuxPath, fakeTmux);
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir);
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+      assert.match(tmuxLog, /send-keys -t %42/);
+      assert.doesNotMatch(tmuxLog, /send-keys -t %91/);
+    });
+  });
+
+  it('does not mark a leader nudge successful when tmux injection stays unconfirmed', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'gamma-unconfirmed';
+      const teamDir = join(stateDir, 'team', teamName);
+      const eventsDir = join(teamDir, 'events');
+      const mailboxDir = join(teamDir, 'mailbox');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(eventsDir, { recursive: true });
+      await mkdir(mailboxDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'omx-team-gamma',
+        leader_pane_id: '%94',
+      });
+      await writeJson(join(mailboxDir, 'leader-fixed.json'), {
+        worker: 'leader-fixed',
+        messages: [
+          {
+            message_id: 'msg-unconfirmed',
+            from_worker: 'worker-1',
+            to_worker: 'leader-fixed',
+            body: 'Need leader review',
+            created_at: '2026-02-14T00:00:00.000Z',
+          },
+        ],
+      });
+
+      const stuckPrompt = `Team ${teamName}: 1 msg(s) for leader. Next: read messages; keep orchestrating; if done, gracefully shut down: omx team shutdown ${teamName}. [OMX_TMUX_INJECT]`;
+      const fakeTmux = `#!/usr/bin/env bash
+set -eu
+echo "$@" >> "${tmuxLogPath}"
+cmd="$1"
+shift || true
+if [[ "$cmd" == "display-message" ]]; then
+  target=""
+  format=""
+  while (($#)); do
+    case "$1" in
+      -p) shift ;;
+      -t) target="$2"; shift 2 ;;
+      *) format="$1"; shift ;;
+    esac
+  done
+  if [[ "$format" == "#{pane_in_mode}" ]]; then
+    echo "0"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_command}" && "$target" == "%94" ]]; then
+    echo "codex"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_start_command}" && "$target" == "%94" ]]; then
+    echo "codex"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_id}" ]]; then
+    echo "%94"
+    exit 0
+  fi
+  if [[ "$format" == "#S" ]]; then
+    echo "omx-team-gamma"
+    exit 0
+  fi
+  exit 0
+fi
+if [[ "$cmd" == "capture-pane" ]]; then
+  printf "%s\\n" "${stuckPrompt}"
+  exit 0
+fi
+if [[ "$cmd" == "send-keys" ]]; then
+  exit 0
+fi
+if [[ "$cmd" == "list-panes" ]]; then
+  printf "%%94\\t1\\tnode\\tcodex\\n"
+  exit 0
+fi
+exit 0
+`;
+      await writeFile(fakeTmuxPath, fakeTmux);
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir);
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      const nudgeStatePath = join(stateDir, 'team-leader-nudge.json');
+      const nudgeState = JSON.parse(await readFile(nudgeStatePath, 'utf-8'));
+      assert.equal(nudgeState.last_nudged_by_team?.[teamName], undefined, 'unconfirmed sends must not advance nudge state');
+
+      const eventsPath = join(eventsDir, 'events.ndjson');
+      if (existsSync(eventsPath)) {
+        const events = (await readFile(eventsPath, 'utf-8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+        assert.ok(!events.some((entry: { type?: string; reason?: string }) =>
+          entry.type === 'team_leader_nudge' && entry.reason === 'new_mailbox_message'));
+      }
+
+      const logPath = join(logsDir, `tmux-hook-${new Date().toISOString().slice(0, 10)}.jsonl`);
+      const log = await readFile(logPath, 'utf-8');
+      assert.match(log, /tmux_send_keys_unconfirmed/);
+    });
+  });
+
   it('bounds repeated all-workers-idle nudges by cooldown', async () => {
     await withTempWorkingDir(async (cwd) => {
       const omxDir = join(cwd, '.omx');
