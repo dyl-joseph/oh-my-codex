@@ -4,9 +4,14 @@
  * Defines types for the OpenClaw gateway waker system.
  * Each hook event can be mapped to a gateway with a pre-defined instruction.
  *
- * NOTE: Codex CLI only supports a limited set of hook events.
- * pre-tool-use, post-tool-use, and keyword-detector are OMC-specific
- * and are NOT available in Codex CLI — excluded here intentionally.
+ * NOTE:
+ * - Raw Codex CLI now exposes native SessionStart / UserPromptSubmit /
+ *   PreToolUse / PostToolUse / Stop hooks.
+ * - This OpenClaw surface is intentionally limited to OMX runtime /
+ *   notification-style events.
+ * - ask-user-question, session-end, and session-idle remain runtime-derived
+ *   OMX events, while keyword-detector remains an OMX runtime behavior rather
+ *   than a direct native Codex hook event.
  */
 
 /** Hook events that can trigger OpenClaw gateway calls */

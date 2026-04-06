@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hooksExtensionDoc = readFileSync(join(__dirname, '../../../docs/hooks-extension.md'), 'utf-8');
 const readme = readFileSync(join(__dirname, '../../../README.md'), 'utf-8');
+const parityMatrix = readFileSync(join(__dirname, '../../../docs/reference/native-codex-hooks-parity-matrix.md'), 'utf-8');
 const hooksCli = readFileSync(join(__dirname, '../../../src/cli/hooks.ts'), 'utf-8');
 const tmuxHookCli = readFileSync(join(__dirname, '../../../src/cli/tmux-hook.ts'), 'utf-8');
 
@@ -20,6 +21,15 @@ describe('native hooks documentation contract', () => {
   it('documents setup and unsupported-runtime expectations', () => {
     assert.match(hooksExtensionDoc, /`omx setup` is expected to force-enable `\[features\]\.codex_hooks = true`/);
     assert.match(hooksExtensionDoc, /Unsupported or disabled native-hook runtimes must surface explicit setup\/doctor status/);
+  });
+
+  it('documents the native parity boundary and matrix link', () => {
+    assert.match(hooksExtensionDoc, /dispatch-only/i);
+    assert.match(hooksExtensionDoc, /auto-nudge remain \*\*runtime fallback\*\*/i);
+    assert.match(hooksExtensionDoc, /Native Codex Hooks Parity Matrix/);
+    assert.match(readme, /Native Codex Hooks Parity Matrix/);
+    assert.match(readme, /do not treat notify\/tmux\/plugin-only behavior as proof of native Codex parity/i);
+    assert.match(parityMatrix, /not synthetic dispatch/i);
   });
 
   it('keeps CLI help aligned with the ownership contract', () => {

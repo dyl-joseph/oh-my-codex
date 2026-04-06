@@ -188,8 +188,12 @@ For non-team sessions, OMX is now native-hook-first:
 - `omx tmux-hook` is reserved for team runtime behavior and legacy tmux troubleshooting
 - unsupported or disabled native-hook runtimes should report explicit setup/doctor status instead
   of silently falling back to non-team tmux injection
+- direct native dispatch, runtime fallback, and unsupported native-control surfaces are tracked
+  separately; do not treat notify/tmux/plugin-only behavior as proof of native Codex parity
 
 See [Hooks extension](./docs/hooks-extension.md) for the native-hook ownership and plugin contract.
+See [Native Codex Hooks Parity Matrix](./docs/reference/native-codex-hooks-parity-matrix.md) for
+the direct / partial / runtime-fallback / unsupported contract.
 
 ### Platform notes for team mode
 

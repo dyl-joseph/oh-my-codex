@@ -69,6 +69,19 @@ Current native events are emitted from existing lifecycle/notify paths:
 
 Pass one keeps this existing event vocabulary; it does **not** introduce an event-taxonomy redesign.
 
+Current OMX native bridging is **dispatch-only** for direct Codex hooks. In other words:
+
+- native event delivery for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop`
+  is real when Codex invokes `.codex/hooks.json`
+- native control outputs such as `UserPromptSubmit.additionalContext`, `PreToolUse` block/warn
+  decisions, `PostToolUse` reminders, and `Stop` one-more-pass continuation are **not bridged by
+  `src/scripts/codex-native-hook.ts` yet**
+- notify-hook/tmux behaviors such as auto-nudge remain **runtime fallback**, not direct native
+  Codex parity
+
+See [Native Codex Hooks Parity Matrix](./reference/native-codex-hooks-parity-matrix.md) for the
+direct / partial / runtime-fallback / unsupported breakdown.
+
 For clawhip-oriented operational routing, see [Clawhip Event Contract](./clawhip-event-contract.md).
 
 Envelope fields include:
@@ -99,6 +112,9 @@ Derived events are labeled with:
 - `source: "derived"`
 - `confidence`
 - parser-specific context hints
+
+These derived signals are best treated as **runtime fallback instrumentation**, not proof that the
+equivalent native Codex hook control surface is implemented.
 
 ## Team-safety behavior
 
