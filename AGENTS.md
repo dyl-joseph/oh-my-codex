@@ -13,17 +13,17 @@ This AGENTS.md is the top-level operating contract for the workspace.
 Role prompts under `prompts/*.md` are narrower execution surfaces. They must follow this file, not override it.
 
 <guidance_schema_contract>
-Canonical guidance schema for this template is defined in `docs/guidance-schema.md`.
+Canonical guidance schema: `docs/guidance-schema.md`.
 
-Required schema sections and this template's mapping:
+Schema sections → template mapping:
 - **Role & Intent**: title + opening paragraphs.
 - **Operating Principles**: `<operating_principles>`.
 - **Execution Protocol**: delegation/model routing/agent catalog/skills/team pipeline sections.
-- **Constraints & Safety**: keyword detection, cancellation, and state-management rules.
+- **Constraints & Safety**: keyword detection, cancellation, state-management rules.
 - **Verification & Completion**: `<verification>` + continuation checks in `<execution_protocols>`.
-- **Recovery & Lifecycle Overlays**: runtime/team overlays are appended by marker-bounded runtime hooks.
+- **Recovery & Lifecycle Overlays**: marker-bounded runtime hooks.
 
-Keep runtime marker contracts stable and non-destructive when overlays are applied:
+Keep runtime marker contracts stable and non-destructive:
 - `<!-- OMX:RUNTIME:START --> ... <!-- OMX:RUNTIME:END -->`
 - `<!-- OMX:TEAM:WORKER:START --> ... <!-- OMX:TEAM:WORKER:END -->`
 </guidance_schema_contract>
@@ -40,7 +40,7 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 - Default to quality-first, intent-deepening responses; think one more step before replying or asking for clarification, and use as much detail as needed for a strong result without empty verbosity.
 - Proceed automatically on clear, low-risk, reversible next steps; ask only for irreversible, side-effectful, or materially branching actions.
 - Treat newer user task updates as local overrides for the active task while preserving earlier non-conflicting instructions.
-- When the user provides newer same-thread evidence (for example logs, stack traces, or test output), treat it as the current source of truth, re-evaluate earlier hypotheses against it, and do not anchor on older evidence unless the user reaffirms it.
+- When the user provides newer same-thread evidence (logs, stack traces, test output), treat it as current source of truth, re-evaluate earlier hypotheses against it, and do not anchor on older evidence unless the user reaffirms it.
 - Persist with tool use when correctness depends on retrieval, inspection, execution, or verification; do not skip prerequisites just because the likely answer seems obvious.
 - More effort does not mean reflexive web/tool escalation; browse or use tools when the task materially benefits, not as a default show of effort.
 <!-- OMX:GUIDANCE:OPERATING:END -->
@@ -48,13 +48,13 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 
 ## Working agreements
 - Write a cleanup plan before modifying code for cleanup/refactor/deslop work.
-- Lock existing behavior with regression tests before cleanup edits when behavior is not already protected.
+- Lock existing behavior with regression tests before cleanup edits when not already protected.
 - Prefer deletion over addition.
 - Reuse existing utils and patterns before introducing new abstractions.
 - No new dependencies without explicit request.
 - Keep diffs small, reviewable, and reversible.
 - Run lint, typecheck, tests, and static analysis after changes.
-- Final reports must include changed files, simplifications made, and remaining risks.
+- Final reports: changed files, simplifications made, remaining risks.
 
 ---
 
@@ -62,8 +62,8 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 Default posture: work directly.
 
 Choose the lane before acting:
-- `$deep-interview` for unclear intent, missing boundaries, or explicit "don't assume" requests. This mode clarifies and hands off; it does not implement.
-- `$ralplan` when requirements are clear enough but plan, tradeoff, or test-shape review is still needed.
+- `$deep-interview` for unclear intent, missing boundaries, or explicit "don't assume" requests. Clarifies and hands off; does not implement.
+- `$ralplan` when requirements are clear but plan/tradeoff/test-shape review is still needed.
 - `$team` when the approved plan needs coordinated parallel execution across multiple lanes.
 - `$ralph` when the approved plan needs a persistent single-owner completion / verification loop.
 - **Solo execute** when the task is already scoped and one agent can finish + verify it directly.
@@ -82,24 +82,24 @@ Leader responsibilities:
 3. Integrate results, decide follow-up, and own final verification.
 
 Worker responsibilities:
-1. Execute the assigned slice; do not rewrite the global plan or switch modes on your own.
-2. Stay inside the assigned write scope; report blockers, shared-file conflicts, and recommended handoffs upward.
-3. Ask the leader to widen scope or resolve ambiguity instead of silently freelancing.
+1. Execute the assigned slice; do not rewrite the global plan or switch modes.
+2. Stay inside assigned write scope; report blockers, shared-file conflicts, and recommended handoffs upward.
+3. Ask the leader to widen scope or resolve ambiguity instead of freelancing.
 
 Rules:
 - Max 6 concurrent child agents.
 - Child prompts stay under AGENTS.md authority.
 - `worker` is a team-runtime surface, not a general-purpose child role.
-- Child agents should report recommended handoffs upward.
-- Child agents should finish their assigned role, not recursively orchestrate unless explicitly told to do so.
-- Prefer inheriting the leader model by omitting `spawn_agent.model` unless a task truly requires a different model.
-- Do not hardcode stale frontier-model overrides for Codex native child agents. If an explicit frontier override is necessary, use the current frontier default from `OMX_DEFAULT_FRONTIER_MODEL` / the repo model contract (currently `gpt-5.4`), not older values such as `gpt-5.2`.
-- Prefer role-appropriate `reasoning_effort` over explicit `model` overrides when the only goal is to make a child think harder or lighter.
+- Child agents finish their assigned role; do not recursively orchestrate unless explicitly told to.
+- Prefer inheriting the leader model by omitting `spawn_agent.model` unless the task truly requires a different model.
+- Do not hardcode stale frontier-model overrides. Use `OMX_DEFAULT_FRONTIER_MODEL` / repo model contract (currently `gpt-5.4`).
+- Prefer role-appropriate `reasoning_effort` over explicit `model` overrides when the only goal is to adjust child thinking intensity.
 </child_agent_protocol>
 
 <invocation_conventions>
-- `$name` — invoke a workflow skill or role keyword
+- `$name` — invoke a workflow skill
 - `/skills` — browse available skills
+- `/prompts:name` — advanced specialist role surface
 </invocation_conventions>
 
 <model_routing>
@@ -108,7 +108,7 @@ Match role to task shape:
 - Standard: `executor`, `debugger`, `test-engineer`
 - High complexity: `architect`, `executor`, `critic`
 
-For Codex native child agents, model routing defaults to inheritance/current repo defaults unless the caller has a concrete reason to override it.
+Model routing defaults to inheritance/current repo defaults unless the caller has a concrete reason to override.
 </model_routing>
 
 ---
@@ -122,86 +122,84 @@ Key roles:
 - `executor` — implementation and refactoring
 - `verifier` — completion evidence and validation
 
-Specialists remain available through skill/keyword routing when the task clearly benefits from them.
+Additional specialists available via `/prompts:*` when the task clearly benefits.
 </agent_catalog>
 
 ---
 
 <keyword_detection>
-When the user message contains a mapped keyword, activate the corresponding skill immediately.
-Do not ask for confirmation.
+When the user message contains a mapped keyword, activate the corresponding skill immediately without asking for confirmation.
 
-Supported workflow triggers include: `ralph`, `autopilot`, `ultrawork`, `ultraqa`, `cleanup`/`refactor`/`deslop`, `analyze`, `plan this`, `deep interview`, `ouroboros`, `ralplan`, `team`/`swarm`, `ecomode`, `cancel`, `tdd`, `fix build`, `code review`, `security review`, and `web-clone`.
-The `deep-interview` skill is the Socratic deep interview workflow and includes the ouroboros trigger family.
+Runtime availability gate:
+- `autopilot`, `ralph`, `ultrawork`, `ultraqa`, `team`/`swarm`, `ecomode` are **OMX runtime workflows**.
+- Auto-activate only when the session runs under OMX CLI/runtime (launched via `omx`, with OMX session overlay/runtime state available).
+- In Codex App or plain Codex sessions without OMX runtime, explain they require OMX CLI and continue with the nearest App-safe surface (`deep-interview`, `ralplan`, `plan`, `/prompts:*`, or native subagents).
 
 | Keyword(s) | Skill | Action |
 |-------------|-------|--------|
-| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Read `./.codex/skills/ralph/SKILL.md`, execute persistence loop |
-| "autopilot", "build me", "I want a" | `$autopilot` | Read `./.codex/skills/autopilot/SKILL.md`, execute autonomous pipeline |
-| "ultrawork", "ulw", "parallel" | `$ultrawork` | Read `./.codex/skills/ultrawork/SKILL.md`, execute parallel agents |
-| "ultraqa" | `$ultraqa` | Read `./.codex/skills/ultraqa/SKILL.md`, run QA cycling workflow |
-| "analyze", "investigate" | `$analyze` | Read `./.codex/skills/analyze/SKILL.md`, run deep analysis |
-| "plan this", "plan the", "let's plan" | `$plan` | Read `./.codex/skills/plan/SKILL.md`, start planning workflow |
-| "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Read `./.codex/skills/deep-interview/SKILL.md`, run Ouroboros-inspired Socratic ambiguity-gated interview workflow |
-| "ralplan", "consensus plan" | `$ralplan` | Read `./.codex/skills/ralplan/SKILL.md`, start consensus planning with RALPLAN-DR structured deliberation (short by default, `--deliberate` for high-risk) |
-| "team", "swarm", "coordinated team", "coordinated swarm" | `$team` | Read `./.codex/skills/team/SKILL.md`, start team orchestration (swarm compatibility alias) |
-| "ecomode", "eco", "budget" | `$ecomode` | Read `./.codex/skills/ecomode/SKILL.md`, enable token-efficient mode |
-| "cancel", "stop", "abort" | `$cancel` | Read `./.codex/skills/cancel/SKILL.md`, cancel active modes |
-| "tdd", "test first" | `$tdd` | Read `./.codex/skills/tdd/SKILL.md`, start test-driven workflow |
-| "fix build", "type errors" | `$build-fix` | Read `./.codex/skills/build-fix/SKILL.md`, fix build errors |
-| "review code", "code review", "code-review" | `$code-review` | Read `./.codex/skills/code-review/SKILL.md`, run code review |
-| "security review" | `$security-review` | Read `./.codex/skills/security-review/SKILL.md`, run security audit |
-| "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Read `./.codex/skills/web-clone/SKILL.md`, start website cloning pipeline |
+| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Runtime-only: persistent completion loop |
+| "autopilot", "build me", "I want a" | `$autopilot` | Runtime-only: autonomous pipeline |
+| "ultrawork", "ulw", "parallel" | `$ultrawork` | Runtime-only: parallel agents |
+| "ultraqa" | `$ultraqa` | Runtime-only: persistent completion + verification loop |
+| "analyze", "investigate" | `$analyze` | Root-cause analysis |
+| "plan this", "plan the", "let's plan" | `$plan` | Planning workflow |
+| "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Socratic ambiguity-gated interview (Ouroboros-inspired) |
+| "ralplan", "consensus plan" | `$ralplan` | RALPLAN-DR structured deliberation (short default, `--deliberate` for high-risk) |
+| "team", "swarm", "coordinated team", "coordinated swarm" | `$team` | Runtime-only: tmux-based team orchestration |
+| "ecomode", "eco", "budget" | `$ecomode` | Runtime-only: cost-aware parallel workflow |
+| "cancel", "stop", "abort" | `$cancel` | Cancel active modes |
+| "tdd", "test first" | `$tdd` | Test-first workflow |
+| "fix build", "type errors" | `$build-fix` | Fix build errors with minimal diff |
+| "review code", "code review", "code-review" | `$code-review` | Code review |
+| "security review" | `$security-review` | Security audit |
+| "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Website cloning pipeline |
 
 Detection rules:
-- Keywords are case-insensitive and match anywhere in the user message.
-- Explicit `$name` invocations run left-to-right and override non-explicit keyword resolution.
-- If multiple non-explicit keywords match, use the most specific match.
-- If the user explicitly invokes `$name`, run those explicit invocations left-to-right before considering non-explicit keyword routing.
-- The rest of the user message becomes the task description.
+- Case-insensitive, match anywhere in message.
+- Explicit `$name` invocations run left-to-right, override non-explicit keyword resolution.
+- Multiple non-explicit matches → most specific wins.
+- Runtime-only keywords must pass runtime availability gate.
+- If user invokes `/prompts:<name>`, do not auto-activate keyword skills unless explicit `$name` tokens are also present.
+- Rest of user message becomes the task description.
 
 Ralph / Ralplan execution gate:
 - Enforce **ralplan-first** when ralph is active and planning is not complete.
 - Planning is complete only after both `.omx/plans/prd-*.md` and `.omx/plans/test-spec-*.md` exist.
-- Until complete, do not begin implementation or execute implementation-focused tools.
+- Until complete, do not begin implementation.
 </keyword_detection>
 
 ---
 
 <skills>
-Skills are workflow commands.
-Core workflows include `autopilot`, `ralph`, `ultrawork`, `visual-verdict`, `web-clone`, `ecomode`, `team`, `swarm`, `ultraqa`, `plan`, `deep-interview` (Socratic deep interview, Ouroboros-inspired), and `ralplan`.
-Utilities include `cancel`, `note`, `doctor`, `help`, and `trace`.
+Core workflows: `autopilot`, `ralph`, `ultrawork`, `visual-verdict`, `web-clone`, `ecomode`, `team`, `swarm`, `ultraqa`, `plan`, `deep-interview` (Socratic, Ouroboros-inspired), `ralplan`.
+Utilities: `cancel`, `note`, `doctor`, `help`, `trace`.
 </skills>
 
 ---
 
 <team_compositions>
-Common team compositions remain available when explicit team orchestration is warranted, for example feature development, bug investigation, code review, and UX audit.
+Common team compositions available for feature development, bug investigation, code review, and UX audit when explicit team orchestration is warranted.
 </team_compositions>
 
 ---
 
 <team_pipeline>
-Team mode is the structured multi-agent surface.
-Canonical pipeline:
-`team-plan -> team-prd -> team-exec -> team-verify -> team-fix (loop)`
-
-Use it when durable staged coordination is worth the overhead. Otherwise, stay direct.
+Canonical pipeline: `team-plan -> team-prd -> team-exec -> team-verify -> team-fix (loop)`
+Use when durable staged coordination is worth the overhead. Otherwise stay direct.
 Terminal states: `complete`, `failed`, `cancelled`.
 </team_pipeline>
 
 ---
 
 <team_model_resolution>
-Team/Swarm workers currently share one `agentType` and one launch-arg set.
+Team/Swarm workers share one `agentType` and one launch-arg set.
 Model precedence:
 1. Explicit model in `OMX_TEAM_WORKER_LAUNCH_ARGS`
 2. Inherited leader `--model`
-3. Low-complexity default model from `OMX_DEFAULT_SPARK_MODEL` (legacy alias: `OMX_SPARK_MODEL`)
+3. Low-complexity default from `OMX_DEFAULT_SPARK_MODEL` (legacy: `OMX_SPARK_MODEL`)
 
-Normalize model flags to one canonical `--model <value>` entry.
-Do not guess frontier/spark defaults from model-family recency; use `OMX_DEFAULT_FRONTIER_MODEL` and `OMX_DEFAULT_SPARK_MODEL`.
+Normalize model flags to one canonical `--model <value>`.
+Do not guess defaults from model-family recency; use `OMX_DEFAULT_FRONTIER_MODEL` and `OMX_DEFAULT_SPARK_MODEL`.
 </team_model_resolution>
 
 <!-- OMX:MODELS:START -->
@@ -213,50 +211,43 @@ Do not guess frontier/spark defaults from model-family recency; use `OMX_DEFAULT
 <verification>
 Verify before claiming completion.
 
-Sizing guidance:
-- Small changes: lightweight verification
-- Standard changes: standard verification
-- Large or security/architectural changes: thorough verification
+Sizing: small changes → lightweight verification; standard → standard; large/security/architectural → thorough.
 
 <!-- OMX:GUIDANCE:VERIFYSEQ:START -->
-Verification loop: identify what proves the claim, run the verification, read the output, then report with evidence. If verification fails, continue iterating rather than reporting incomplete work. Default to quality-first evidence summaries: think one more step before declaring completion, and include enough detail to make the proof actionable without padding.
+Verification loop: identify what proves the claim, run verification, read output, report with evidence. If verification fails, keep iterating. Default to quality-first evidence summaries: think one more step before declaring completion; include enough detail to make proof actionable.
 
-- Run dependent tasks sequentially; verify prerequisites before starting downstream actions.
-- If a task update changes only the current branch of work, apply it locally and continue without reinterpreting unrelated standing instructions.
+- Run dependent tasks sequentially; verify prerequisites before downstream actions.
+- If a task update changes only the current branch of work, apply locally and continue without reinterpreting unrelated instructions.
 - When correctness depends on retrieval, diagnostics, tests, or other tools, continue using them until the task is grounded and verified.
 <!-- OMX:GUIDANCE:VERIFYSEQ:END -->
 </verification>
 
 <execution_protocols>
 Mode selection:
-- Use `$deep-interview` first when the request is broad, intent/boundaries are unclear, or the user says not to assume.
-- Use `$ralplan` when the requirements are clear enough but architecture, tradeoffs, or test strategy still need consensus.
-- Use `$team` when the approved plan has multiple independent lanes, shared blockers, or durable coordination needs.
-- Use `$ralph` when the approved plan should stay in a persistent completion / verification loop with one owner.
+- `$deep-interview` first when request is broad, intent unclear, or user says not to assume.
+- `$ralplan` when requirements clear but architecture/tradeoffs/test strategy need consensus.
+- `$team` when approved plan has multiple independent lanes or durable coordination needs.
+- `$ralph` for persistent completion / verification loop with one owner.
 - Otherwise execute directly in solo mode.
-- Do not change modes casually; switch only when evidence shows the current lane is mismatched or blocked.
+- Do not change modes casually; switch only when evidence shows current lane is mismatched or blocked.
 
 Command routing:
-- When `USE_OMX_EXPLORE_CMD` enables advisory routing, strongly prefer `omx explore` as the default surface for simple read-only repository lookup tasks (files, symbols, patterns, relationships).
-- For simple file/symbol lookups, use `omx explore` FIRST before attempting full code analysis.
-
-When to use what:
-- Use `omx explore --prompt ...` for simple read-only lookups.
-- Use `omx sparkshell` for noisy read-only shell commands, bounded verification runs, repo-wide listing/search, or tmux-pane summaries; `omx sparkshell --tmux-pane ...` is explicit opt-in.
-- Keep ambiguous, implementation-heavy, edit-heavy, or non-shell-only work on the richer normal path.
-- `omx explore` is a shell-only, allowlisted, read-only path; do not rely on it for edits, tests, diagnostics, MCP/web access, or complex shell composition.
-- If `omx explore` or `omx sparkshell` is incomplete or ambiguous, retry narrower and gracefully fall back to the normal path.
+- When `USE_OMX_EXPLORE_CMD` is active, prefer `omx explore` for simple read-only repository lookups (files, symbols, patterns).
+- Use `omx sparkshell` for noisy read-only shell commands, bounded verification runs, repo-wide search, or tmux-pane summaries.
+- Keep edit-heavy, implementation, or non-shell-only work on the normal path.
+- `omx explore` is shell-only, allowlisted, read-only; do not rely on it for edits, tests, diagnostics, MCP/web access, or complex shell composition.
+- If `omx explore` or `omx sparkshell` is incomplete, retry narrower then fall back to normal path.
 
 Leader vs worker:
-- The leader chooses the mode, keeps the brief current, delegates bounded work, and owns verification plus stop/escalate calls.
-- Workers execute their assigned slice, do not re-plan the whole task or switch modes on their own, and report blockers or recommended handoffs upward.
-- Workers escalate shared-file conflicts, scope expansion, or missing authority to the leader instead of freelancing.
+- Leader chooses mode, keeps brief current, delegates bounded work, owns verification + stop/escalate.
+- Workers execute their assigned slice, do not re-plan or switch modes, report blockers or recommended handoffs upward.
+- Workers escalate shared-file conflicts, scope expansion, or missing authority to leader.
 
 Stop / escalate:
-- Stop when the task is verified complete, the user says stop/cancel, or no meaningful recovery path remains.
-- Escalate to the user only for irreversible, destructive, or materially branching decisions, or when required authority is missing.
+- Stop when task is verified complete, user says stop/cancel, or no meaningful recovery path remains.
+- Escalate to user only for irreversible, destructive, or materially branching decisions, or when required authority is missing.
 - Escalate from worker to leader for blockers, scope expansion, shared ownership conflicts, or mode mismatch.
-- `deep-interview` and `ralplan` stop at a clarified artifact or approved-plan handoff; they do not implement unless execution mode is explicitly switched.
+- `deep-interview` and `ralplan` stop at clarified artifact or approved-plan handoff; they do not implement unless execution mode is explicitly switched.
 
 Output contract:
 - Default update/final shape: current mode; action/result; evidence or blocker/next step.
@@ -264,15 +255,15 @@ Output contract:
 - Expand only for risk, handoff, or explicit user request.
 
 Parallelization:
-- Run independent tasks in parallel.
-- Run dependent tasks sequentially.
+- Run independent tasks in parallel; dependent tasks sequentially.
 - Use background execution for builds and tests when helpful.
-- Prefer Team mode only when its coordination value outweighs its overhead.
-- If correctness depends on retrieval, diagnostics, tests, or other tools, continue using them until the task is grounded and verified.
+- Prefer Team mode only when coordination value outweighs overhead.
+- If correctness depends on tools, do not skip prerequisites; continue until the task is grounded and verified.
 
 Anti-slop workflow:
-- Cleanup/refactor/deslop work still follows the same `$deep-interview` -> `$ralplan` -> `$team`/`$ralph` path; use `$ai-slop-cleaner` as a bounded helper inside the chosen execution lane, not as a competing top-level workflow.
-- Lock behavior with tests first, then make one smell-focused pass at a time.
+- Cleanup/refactor/deslop follows same `$deep-interview` → `$ralplan` → `$team`/`$ralph` path.
+- Use `$ai-slop-cleaner` as a bounded helper inside the chosen lane, not a competing top-level workflow.
+- Lock behavior with tests first, then one smell-focused pass at a time.
 - Prefer deletion, reuse, and boundary repair over new layers.
 - Keep writer/reviewer pass separation for cleanup plans and approvals.
 
@@ -288,8 +279,8 @@ If ralph is active, verify PRD + test spec artifacts exist before implementation
 </execution_protocols>
 
 <cancellation>
-Use the `cancel` skill to end execution modes.
-Cancel when work is done and verified, when the user says stop, or when a hard blocker prevents meaningful progress.
+Use `cancel` skill to end execution modes.
+Cancel when done and verified, user says stop, or hard blocker prevents progress.
 Do not cancel while recoverable work remains.
 </cancellation>
 
@@ -303,13 +294,9 @@ OMX persists runtime state under `.omx/`:
 - `.omx/plans/` — plans
 - `.omx/logs/` — logs
 
-Available MCP groups include state/memory tools, code-intel tools, and trace tools.
+MCP groups: state/memory tools, code-intel tools, trace tools.
 
-Mode lifecycle requirements:
-- Write state on start.
-- Update state on phase or iteration change.
-- Mark inactive with `completed_at` on completion.
-- Clear state on cancel/abort cleanup.
+Mode lifecycle: write state on start; update on phase/iteration change; mark inactive with `completed_at` on completion; clear on cancel/abort.
 </state_management>
 
 ---
