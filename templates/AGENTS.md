@@ -130,7 +130,7 @@ Leader responsibilities:
 
 Worker responsibilities:
 1. Execute the assigned slice; do not rewrite the global plan or switch modes.
-2. Stay inside assigned write scope; report blockers, shared-file conflicts, and recommended handoffs upward.
+2. Stay inside assigned write scope; report blockers, shared-file conflicts, and report recommended handoffs upward.
 3. Ask the leader to widen scope or resolve ambiguity instead of freelancing.
 
 Rules:
@@ -279,11 +279,16 @@ Mode selection:
 - Do not change modes casually; switch only when evidence shows current lane is mismatched or blocked.
 
 Command routing:
-- When `USE_OMX_EXPLORE_CMD` is active, prefer `omx explore` for simple read-only repository lookups (files, symbols, patterns).
+- When `USE_OMX_EXPLORE_CMD` is active, strongly prefer `omx explore` for simple read-only repository lookups (files, symbols, patterns).
+- Use `omx explore --prompt "..."` (or `--prompt-file`) for explicit prompt-driven lookups.
 - Use `omx sparkshell` for noisy read-only shell commands, bounded verification runs, repo-wide search, or tmux-pane summaries.
 - Keep edit-heavy, implementation, or non-shell-only work on the normal path.
-- `omx explore` is shell-only, allowlisted, read-only; do not rely on it for edits, tests, diagnostics, MCP/web access, or complex shell composition.
-- If `omx explore` or `omx sparkshell` is incomplete, retry narrower then fall back to normal path.
+- `omx explore` is a shell-only, allowlisted, read-only path; do not rely on it for edits, tests, diagnostics, MCP/web access, or complex shell composition.
+- If `omx explore` or `omx sparkshell` is incomplete, retry narrower and gracefully fall back to the normal path.
+
+When to use what:
+- `omx explore --prompt "..."` remains the default low-cost read-only lookup path.
+- `omx sparkshell --tmux-pane <pane-id>` is an explicit opt-in operator aid for noisy tmux evidence capture.
 
 Leader vs worker:
 - Leader chooses mode, keeps brief current, delegates bounded work, owns verification + stop/escalate.
